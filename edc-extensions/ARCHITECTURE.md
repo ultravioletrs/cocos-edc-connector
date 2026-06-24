@@ -42,19 +42,20 @@ graph TD
         KeyProvider["CoCo Keyprovider (Port 50011)"]
         Skopeo["Skopeo / Ocicrypt"]
         Workload["Secure ML/AI Workload"]
+        TEE["TEE Hardware (AMD SEV-SNP / TDX)"]
         
         CocosCliGo -->|gRPC: Algo, Data, Attestation, Result| CocosAgentGo
         CocosAgentGo -->|1. Receives Manifest| CocosAgentGo
         CocosAgentGo -->|2. Triggers download| Skopeo
         Skopeo -->|3. Needs decryption key| KeyProvider
         KeyProvider -->|4. Generates quote/evidence| AttestationAgent
-        AttestationAgent -->|5. Fetches hardware evidence| CVM
+        AttestationAgent -->|5. Fetches hardware evidence| TEE
         KeyProvider -->|6. Requests Key with Evidence| KBS
         Skopeo -->|7. Decrypts & extracts| Workload
         CocosAgentGo -->|8. Executes Workload| Workload
     end
 
-    TC -->|Phase 1: Provisions & configures CVMs via cloud-init| CVM
+    TC -->|Phase 1: Provisions & configures CVMs via cloud-init| CocosAgentGo
     CC_EDC -->|Request VP with Attestation| CW
     CW -->|Verify TEE Report| KBS
     CC_EDC -->|Sends VP / SI-Token| P_EDC
@@ -270,7 +271,7 @@ To integrate resources negotiated via the Data Space Connector into Cocos AI CVM
   3. The `cocos-agent` inside the TEE receives the manifest and triggers its own internal downloader client (S3/HTTP downloader or OCI pull via `Skopeo`).
   4. The agent requests decryption keys directly from the Key Broker Service (`KBS`) using local hardware attestation verification enclaves (`CoCo Keyprovider` / `Attestation Agent`).
 * **Pros**:
-  - Direct point-to-point streaming from storage to TEE enclave, maximizing performance for large datasets.
+  - Point-to-point streaming from storage to TEE enclave, maximizing performance for large datasets.
   - Decryption logic and key management are offloaded entirely to hardware enclaves.
 * **Cons**:
   - Requires enclaves to have outbound internet/network access to external storage buckets and OCI registries.
@@ -322,9 +323,9 @@ if !kbsEnabled || as.computation.Algorithm.Source == nil {
 // MODIFICATION START: Find matching dataset manifest to check if key retrieval is needed
 for i, d := range as.computation.Datasets {
     if hash == d.Hash {
-        // ... previous validation logic ...
+        # ... previous validation logic ...
         
-        // Decrypt dataset bytes if encrypted
+        # Decrypt dataset bytes if encrypted
         kbsEnabled := d.KBS != nil && d.KBS.Enabled
         kbsURL := ""
         if d.KBS != nil {
@@ -343,7 +344,7 @@ for i, d := range as.computation.Datasets {
             datasetData = decrypted
         }
         
-        // ... proceed with write / decompression ...
+        # ... proceed with write / decompression ...
     }
 }
 // MODIFICATION END
