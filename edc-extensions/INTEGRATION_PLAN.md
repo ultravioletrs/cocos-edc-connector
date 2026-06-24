@@ -13,9 +13,16 @@ In scope:
 
 Out of scope:
 
-- external VM provisioning systems
+- external VM provisioning systems (handled by Tower)
 - external provider deployments
 - external Identity Hub and ledger implementations
+
+## Orchestration & Trust Assumptions
+
+- **VM Provisioning via Tower**: The creation, configuration, and destruction of Confidential VMs (CVMs) using AMD SEV-SNP or Intel TDX enclaves is handled entirely by the **Tower Connector** / Tower Platform (Phase 1 of execution).
+- **Cloud-Init Agent Configuration**: Tower configures the running `cocos-agent` (including its gRPC ports, server CA credentials, and outbound target address back to the connector) via **cloud-init** on VM boot.
+- **Exclusion of cocos-manager**: The `cocos-manager` host component is not part of this integration. The Cocos EDC Extensions assume CVM enclaves are pre-provisioned and active before a computation is run, meaning the connector only interacts directly with the `cocos-agent` inside the VM.
+- **User Authentication via OID4VP**: User authentication for dashboard portals (e.g. TITAN Dashboard) utilizing OpenID for Verifiable Presentations (OID4VP) to exchange a `MembershipCredential` for an OIDC Token is out-of-scope for Cocos AI and is managed entirely by mocked or partner-provided systems (TITAN SSI Bridge, Keycloak Custom Auth SPI, UMU Wallet, and UMU Verifier).
 
 ## Current State
 
@@ -121,18 +128,42 @@ Outcome:
 
 - the integration is usable by external adopters and easier to troubleshoot
 
+### 7. Implement the CVMS Server in Java (Connector-Side)
+
+- define the CVMS gRPC service (based on `cvms.proto` from the `cocos-ai` repository) inside the Java codebase using `grpc-java`
+- configure the gRPC server (port 7002) to accept outbound connections from enclaves' agents
+- implement chunk-based streaming of the computation manifest over the active `Process` connection when `CocosCliServiceImpl.startAgent(...)` is called
+- capture and route agent logs and events from the stream to the EDC monitor / structured logger
+
+Outcome:
+
+- the connector can bootstrap the agent and stream manifestations without using third-party sidecars
+
+### 8. Implement KBS Decryption for Directly Uploaded Assets (Agent-Side)
+
+- modify `/home/sammyk/Documents/cocos-ai/agent/service.go` to intercept directly uploaded algorithms (`Algo`) and datasets (`Data`)
+- retrieve decryption keys from the KBS (via the enclaves' Attestation Agent / `getKeyFromKBS`) if the manifest marks them as encrypted
+- decrypt incoming payloads inside the TEE enclave using AES-256-GCM before writing them to the sandbox directory
+
+Outcome:
+
+- direct uploads transferred via the EDC Data Plane (Model A) support hardware-attested KBS key retrieval and decryption inside the CVM
+
 ## Recommended Execution Order
 
 1. contracts and public docs
 2. tests and fixtures
 3. CLI bridge
-4. DSP consumer flow
-5. Identity Hub adapter
-6. hybrid and partner-facing setup guides
+4. Go Agent direct-upload decryption modification
+5. Java CVMS Server implementation
+6. DSP consumer flow
+7. Identity Hub adapter
+8. hybrid and partner-facing setup guides
 
 ## Short-Term Next Steps
 
 1. verify upstream EDC artifact coordinates and Java 17+ build baseline
 2. add the first standalone tests for orchestrator and computation API
 3. define the `cocos-cli` command mapping used by the extension modules
-4. publish the first public request and callback contracts
+4. design the CVMS gRPC server extension module skeleton using `grpc-java`
+5. publish the first public request and callback contracts
