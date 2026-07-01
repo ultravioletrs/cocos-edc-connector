@@ -2,7 +2,7 @@
 
 This repository contains the Cocos-owned Eclipse Dataspace Components (EDC) extensions. It provides the integration bridge between the Cocos Confidential Computing platform (secure enclaves) and standard dataspace connectors.
 
-By compiling these modules as standalone extensions, Cocos support can be plugged into any upstream deployment of the [Eclipse EDC Connector](https://github.com/eclipse-edc/Connector) as drop-in libraries without carrying or maintaining a long-lived fork of the connector codebase.
+By compiling these modules as standalone extensions, Cocos support can be plugged into any upstream deployment of the [Eclipse EDC Connector](https://github.com/eclipse-edc/Connector) (at tag [**`v0.18.0`**](https://github.com/eclipse-edc/Connector/tree/v0.18.0)) as drop-in libraries without carrying or maintaining a long-lived fork of the connector codebase.
 
 ---
 
