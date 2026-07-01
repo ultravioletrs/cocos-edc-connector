@@ -12,7 +12,11 @@ public class ComputationRequest {
     private String towerCallbackUrl;
     private List<ComputationUnit> units = new ArrayList<>();
 
-    private ComputationRequest() {}
+    public ComputationRequest() {}
+
+    public void setJobId(String jobId) { this.jobId = jobId; }
+    public void setTowerCallbackUrl(String url) { this.towerCallbackUrl = url; }
+    public void setUnits(List<ComputationUnit> units) { this.units = units; }
 
     public String getJobId() { return jobId; }
 

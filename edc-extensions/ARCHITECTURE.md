@@ -215,23 +215,7 @@ Since we are in charge of **Cocos AI**, the core components are:
 
 ---
 
-## 4. Current Gaps & Missing Features in Cocos AI
-
-To keep changes minimal in `cocos-ai`, the following gaps in the current implementation are noted and should be targeted as proposed features or documented workarounds:
-
-1. **Hardware-Attested Key Release for Non-OCI Resources**:
-   - Currently, decryption keys for remote HTTP/S3 resources are retrieved via a direct HTTP GET request to the KBS (`getKeyFromKBS`).
-   - *Missing Feature*: Non-OCI resource key retrieval should run through the local `Attestation Agent` to perform hardware-gated attestation verification before releasing the key.
-2. **Dynamic CVM Ingress / Federated Networking**:
-   - In a Federated Learning setup, FL Clients must communicate with the FL Server aggregate VM.
-   - *Missing Feature*: Enclaves currently require external network configuration or public exposure. A dynamic in-enclave ingress reverse-proxy configuration is needed to route communication securely between client/server enclaves.
-3. **Attestation Report Caching & Performance**:
-   - During Phases 3, 4, and 5, the agent is queried repeatedly for attestation reports with different nonces.
-   - *Missing Feature*: Generating TEE quotes in hardware enclaves is computationally expensive. Introducing a caching layer or session management to reuse attestation metrics while updating nonces dynamically would optimize the DSP negotiation phase.
-
----
-
-## 5. User Authentication via OID4VP (Portal/UI Access)
+## 4. User Authentication via OID4VP (Portal/UI Access)
 
 While machine-to-machine DSP communication uses attestation-backed credential presentation (Phases 3-5), user access to portal systems (like the *TITAN Dashboard* or *EOSC Resource Hub*) utilizes a **Modified OIDC Authorization Code Flow with OID4VP** (OpenID for Verifiable Presentations), which replaces traditional username/password credentials.
 
@@ -247,7 +231,7 @@ While machine-to-machine DSP communication uses attestation-backed credential pr
 
 ---
 
-## 6. Resource Transfer Models: Data Plane Sinks vs. In-Agent Downloads
+## 5. Resource Transfer Models: Data Plane Sinks vs. In-Agent Downloads
 
 To integrate resources negotiated via the Data Space Connector into Cocos AI CVMs, the architecture supports two distinct data transfer models. The `CocosVmDataSink` EDC extension acts as the primary integration bridge.
 
@@ -280,72 +264,5 @@ To integrate resources negotiated via the Data Space Connector into Cocos AI CVM
 ### Recommendation & Unified Integration Strategy
 The **direct upload model (Model A)** is used as the default out-of-the-box pipeline, using `CocosVmDataSink` to transfer data via the `cocos-cli` subprocess bridge. This ensures maximum compatibility and strict network isolation for enclaves.
 
-To achieve this without code modifications:
-- If the manifest lists a dataset/algorithm **without** a `source` URL, the Go `cocos-agent` enters the `ReceivingAlgorithm` or `ReceivingData` state and waits for `cocos-cli` to upload the payload directly via gRPC stream.
-- If the manifest contains a `source` URL and KBS is enabled, the agent automatically bypasses the direct upload listeners and downloads the asset via its own internal downloader clients.
+Both Model A and Model B fully support hardware-attested decryption. Under Model A, if the computation manifest marks the uploaded algorithm or dataset as encrypted, the agent retrieves the decryption key from the KBS and decrypts the payload inside the enclave before executing the script.
 
----
-
-## 7. Proposed Cocos Agent Modification for Data Plane Decryption (Model A + KBS)
-
-### The Problem
-Under the default **Model A (Direct Upload)**, assets are streamed to the agent via `Data()` or `Algo()` gRPC endpoints. If the provider's assets are encrypted on the storage server, the agent currently stores and uses the raw uploaded bytes directly. It does not communicate with the Key Broker Service (`KBS`) to retrieve keys or attempt decryption, which breaks key verification protocols for direct uploads.
-
-### Proposed Code Changes in `cocos-agent`
-To resolve this gap, modify `/home/sammyk/Documents/cocos-ai/agent/service.go` so that if a directly uploaded asset is marked as encrypted in the manifest, the agent retrieves the decryption key from the KBS and decrypts the payload before saving it.
-
-#### 1. In `Algo(...)`
-```go
-// Add checking for manifest-based encryption config on direct uploads
-if !kbsEnabled || as.computation.Algorithm.Source == nil {
-    // Current fallback uses directly uploaded algorithm
-    algoData = algo.Algorithm
-    
-    // MODIFICATION START: If the uploaded algo is configured as encrypted, decrypt it using KBS keys
-    if as.computation.Algorithm.Source != nil && as.computation.Algorithm.Source.Encrypted {
-        as.logger.Info("directly uploaded algorithm is encrypted, retrieving key from KBS")
-        key, err := as.getKeyFromKBS(ctx, kbsURL, as.computation.Algorithm.Source.KBSResourcePath)
-        if err != nil {
-            return fmt.Errorf("failed to retrieve key from KBS for uploaded algorithm: %w", err)
-        }
-        decrypted, err := resource.DecryptData(algoData, key)
-        if err != nil {
-            return fmt.Errorf("failed to decrypt uploaded algorithm: %w", err)
-        }
-        algoData = decrypted
-    }
-    // MODIFICATION END
-}
-```
-
-#### 2. In `Data(...)`
-```go
-// MODIFICATION START: Find matching dataset manifest to check if key retrieval is needed
-for i, d := range as.computation.Datasets {
-    if hash == d.Hash {
-        # ... previous validation logic ...
-        
-        # Decrypt dataset bytes if encrypted
-        kbsEnabled := d.KBS != nil && d.KBS.Enabled
-        kbsURL := ""
-        if d.KBS != nil {
-            kbsURL = d.KBS.URL
-        }
-        if d.Source != nil && d.Source.Encrypted && kbsEnabled {
-            as.logger.Info("directly uploaded dataset is encrypted, retrieving key from KBS", "filename", d.Filename)
-            key, err := as.getKeyFromKBS(ctx, kbsURL, d.Source.KBSResourcePath)
-            if err != nil {
-                return fmt.Errorf("failed to retrieve key from KBS for dataset %s: %w", d.Filename, err)
-            }
-            decrypted, err := resource.DecryptData(datasetData, key)
-            if err != nil {
-                return fmt.Errorf("failed to decrypt dataset %s: %w", d.Filename, err)
-            }
-            datasetData = decrypted
-        }
-        
-        # ... proceed with write / decompression ...
-    }
-}
-// MODIFICATION END
-```

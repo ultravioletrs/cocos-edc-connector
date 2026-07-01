@@ -9,7 +9,11 @@ public class AgentConfig {
     private String logLevel = "INFO";
     private boolean enableAttestation = true;
 
-    private AgentConfig() {}
+    public AgentConfig() {}
+
+    public void setPort(int port) { this.port = port; }
+    public void setLogLevel(String logLevel) { this.logLevel = logLevel; }
+    public void setEnableAttestation(boolean enableAttestation) { this.enableAttestation = enableAttestation; }
 
     public int getPort() { return port; }
 

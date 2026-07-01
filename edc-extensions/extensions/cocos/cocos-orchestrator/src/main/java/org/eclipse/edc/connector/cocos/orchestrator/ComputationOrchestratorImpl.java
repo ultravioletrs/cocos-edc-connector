@@ -87,15 +87,6 @@ public class ComputationOrchestratorImpl implements ComputationOrchestrator {
     private void uploadUnitAssets(ComputationUnit unit) {
         var manifest = unit.getManifest();
 
-        for (var dataset : manifest.getDatasets()) {
-            byte[] data = resolveAsset(unit.getVmIp(), dataset.getSource(), dataset.getProviderConnectorUrl());
-            var result = cliService.uploadDataset(unit.getVmIp(), dataset.getFilename(), data);
-            if (result.failed()) {
-                throw new RuntimeException("Failed to upload dataset " + dataset.getFilename()
-                        + " to " + unit.getVmIp() + ": " + result.getFailureDetail());
-            }
-        }
-
         var algo = manifest.getAlgorithm();
         if (algo != null) {
             byte[] data = resolveAsset(unit.getVmIp(), algo.getSource(), algo.getProviderConnectorUrl());
@@ -105,11 +96,23 @@ public class ComputationOrchestratorImpl implements ComputationOrchestrator {
                         + " to " + unit.getVmIp() + ": " + result.getFailureDetail());
             }
         }
+
+        for (var dataset : manifest.getDatasets()) {
+            byte[] data = resolveAsset(unit.getVmIp(), dataset.getSource(), dataset.getProviderConnectorUrl());
+            var result = cliService.uploadDataset(unit.getVmIp(), dataset.getFilename(), data);
+            if (result.failed()) {
+                throw new RuntimeException("Failed to upload dataset " + dataset.getFilename()
+                        + " to " + unit.getVmIp() + ": " + result.getFailureDetail());
+            }
+        }
     }
 
     private byte[] resolveAsset(String vmIp, AssetSource source, String providerConnectorUrl) {
         if (source.getType() == AssetSource.Type.FILE) {
-            return source.getContent();
+            if (source.getContent() == null) {
+                return new byte[0];
+            }
+            return java.util.Base64.getDecoder().decode(source.getContent().trim());
         }
         CocosContextHolder.setActiveVmIp(vmIp);
         try {
