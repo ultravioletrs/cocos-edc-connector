@@ -26,6 +26,7 @@ public class CocosOrchestratorExtension implements ServiceExtension {
     private EdcHttpClient httpClient;
 
     private InMemoryComputationJobStore jobStore;
+    private CvmsGrpcServer cvmsServer;
 
     @Override
     public String name() {
@@ -35,6 +36,24 @@ public class CocosOrchestratorExtension implements ServiceExtension {
     @Override
     public void initialize(ServiceExtensionContext context) {
         jobStore = new InMemoryComputationJobStore();
+
+        int cvmsPort = context.getSetting("cocos.cvms.port", 7002);
+        String publicKeyPath = context.getSetting("cocos.cli.publicKey.path", "public.pem");
+        String kbsUrl = context.getSetting("cocos.kbs.url", "http://localhost:8090");
+
+        cvmsServer = new CvmsGrpcServer(cvmsPort, publicKeyPath, kbsUrl, context.getMonitor());
+        try {
+            cvmsServer.start();
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to start CVMS gRPC Server", e);
+        }
+    }
+
+    @Override
+    public void shutdown() {
+        if (cvmsServer != null) {
+            cvmsServer.stop();
+        }
     }
 
     @Provider

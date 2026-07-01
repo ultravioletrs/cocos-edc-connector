@@ -8,7 +8,10 @@ public class ComputationUnit {
     private String vmIp;
     private ComputeManifest manifest;
 
-    private ComputationUnit() {}
+    public ComputationUnit() {}
+
+    public void setVmIp(String vmIp) { this.vmIp = vmIp; }
+    public void setManifest(ComputeManifest manifest) { this.manifest = manifest; }
 
     public String getVmIp() { return vmIp; }
 

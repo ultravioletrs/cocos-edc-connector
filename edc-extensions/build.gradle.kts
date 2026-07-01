@@ -34,12 +34,20 @@ val packageUpstreamDropins by tasks.registering(Sync::class) {
 
     into(layout.buildDirectory.dir("upstream-dropins"))
 
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+
     from("README.md")
     from("INTEGRATION_PLAN.md")
 
     into("libs") {
         extensionProjects.forEach { projectPath ->
             from(project(projectPath).layout.buildDirectory.file("libs/${project(projectPath).name}-${project.version}.jar"))
+            from(project(projectPath).configurations.getByName("runtimeClasspath")) {
+                exclude { details ->
+                    val name = details.file.name
+                    name.contains("jackson-") || name.contains("edc-") || name.contains("jersey-") || name.contains("jetty-")
+                }
+            }
         }
     }
 }

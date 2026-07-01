@@ -1,0 +1,151 @@
+// Copyright (c) Ultraviolet
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+package cvms;
+
+option go_package = "./cvms";
+option java_multiple_files = true;
+option java_package = "org.eclipse.edc.connector.cocos.orchestrator.cvms";
+
+service Service {
+  rpc Process(stream ClientStreamMessage) returns (stream ServerStreamMessage) {}
+}
+
+message AgentStateReq {
+  string id = 1;
+}
+
+message AgentStateRes {
+  string id = 1;
+  string state = 2;
+}
+
+message StopComputation {
+  string computation_id = 1;
+}
+
+message StopComputationResponse {
+  string computation_id = 1;
+  string message = 2;
+}
+
+message RunResponse{
+  string computation_id = 1;
+  string error = 2;
+}
+
+message AgentEvent {
+  string event_type = 1;
+  google.protobuf.Timestamp timestamp = 2;
+  string	computation_id = 3;
+  bytes	details = 4;
+  string	originator = 5;
+  string	status = 6;
+}
+
+message AgentLog {
+  string message = 1;
+  string computation_id = 2;
+  string level = 3;
+  google.protobuf.Timestamp timestamp = 4;
+}
+
+message ClientStreamMessage {
+  oneof message {
+    AgentLog agent_log = 1;
+    AgentEvent agent_event = 2;
+    RunResponse run_res = 3;
+    StopComputationResponse stopComputationRes = 4;
+    AgentStateRes agentStateRes = 5;
+    AttestationResponse vTPMattestationReport = 6;
+    azureAttestationToken azureAttestationToken = 7;
+  }
+}
+
+message ServerStreamMessage {
+  oneof message {
+    RunReqChunks runReqChunks = 1;
+    ComputationRunReq runReq = 2;
+    StopComputation stopComputation = 3;
+    AgentStateReq agentStateReq = 4;
+    DisconnectReq disconnectReq = 5;
+  }
+}
+
+message DisconnectReq {
+  string id = 1;
+}
+
+message RunReqChunks {
+  bytes data = 1;
+  string id = 2;
+  bool is_last = 3;
+}
+
+message ComputationRunReq {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  repeated Dataset datasets = 4;
+  Algorithm algorithm = 5;
+  repeated ResultConsumer result_consumers = 6;
+  AgentConfig agent_config = 7;
+}
+
+message ResultConsumer {
+  bytes userKey = 1;
+}
+
+message Dataset {
+  bytes hash = 1; // should be sha3.Sum256, 32 byte length.
+  bytes userKey = 2;
+  string filename = 3;
+  Source source = 4; // Optional remote source for encrypted dataset
+  bool decompress = 5;
+  KBSConfig kbs = 6; // Optional KBS configuration override
+}
+
+message Algorithm {
+  bytes hash = 1; // should be sha3.Sum256, 32 byte length.
+  bytes userKey = 2;
+  Source source = 3; // Optional remote source for encrypted algorithm
+  string algo_type = 4;
+  repeated string algo_args = 5;
+  KBSConfig kbs = 6; // Optional KBS configuration override
+}
+
+message Source {
+  string type = 1; // Type of source: "oci-image", "s3", "gcs", "https", "http"
+  string url = 2; // URL of the resource (e.g., docker://registry/repo:tag, s3://bucket/key, https://host/path)
+  string kbs_resource_path = 3; // Path to decryption key in KBS (e.g., "default/key/my-key")
+  bool encrypted = 4; // Whether the resource is encrypted (requires KBS)
+}
+
+message KBSConfig {
+  string url = 1; // KBS endpoint URL (e.g., "https://kbs.example.com")
+  bool enabled = 2; // Whether to use KBS for key retrieval
+}
+
+message AgentConfig {
+  string port = 1;
+  string cert_file = 2;
+  string key_file = 3;
+  string client_ca_file = 4;
+  string server_ca_file = 5;
+  string log_level = 6;
+  bool   attested_tls = 7;
+}
+
+message AttestationResponse {
+  bytes file = 1;
+  string certSerialNumber = 2;
+}
+
+message azureAttestationToken {
+  bytes file = 1;
+  string certSerialNumber = 2;
+}

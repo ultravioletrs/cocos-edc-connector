@@ -15,7 +15,14 @@ public class ComputeManifest {
     private AlgorithmSpec algorithm;
     private AgentConfig agentConfig;
 
-    private ComputeManifest() {}
+    public ComputeManifest() {}
+
+    public void setId(String id) { this.id = id; }
+    public void setName(String name) { this.name = name; }
+    public void setDescription(String description) { this.description = description; }
+    public void setDatasets(List<DatasetSpec> datasets) { this.datasets = datasets; }
+    public void setAlgorithm(AlgorithmSpec algorithm) { this.algorithm = algorithm; }
+    public void setAgentConfig(AgentConfig agentConfig) { this.agentConfig = agentConfig; }
 
     public String getId() { return id; }
 
