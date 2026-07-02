@@ -1,0 +1,59 @@
+# #############################################################
+# Cocos EDC Connector Configuration Example
+# #############################################################
+# This file contains the configuration properties required to run the
+# Eclipse EDC Connector with the Cocos extension modules.
+#
+# Properties can be defined in this file (loaded via edc.properties)
+# or passed as JVM system properties (e.g., -Dweb.http.port=8082).
+# #############################################################
+
+# =============================================================
+# 1. Standard EDC Web Server Configuration
+# =============================================================
+
+# Port for standard http endpoints (catalog, etc.)
+web.http.port=8082
+web.http.path=/api
+
+# Port for Dataspace Protocol (DSP) communications between connectors
+web.http.protocol.port=8083
+web.http.protocol.path=/api/v1/dsp
+
+# Port for the Management API (used to trigger computation runs, etc.)
+web.http.management.port=8084
+web.http.management.path=/api/management
+
+# Port for internal control operations
+web.http.control.port=8085
+web.http.control.path=/api/control
+
+# =============================================================
+# 2. Cocos Extension Configurations
+# =============================================================
+
+# [REQUIRED] Absolute path to the cocos-cli binary executable.
+# The CLI is invoked as a subprocess to handle attestation, result packages, etc.
+cocos.cli.path=/usr/local/bin/cocos-cli
+
+# [REQUIRED] Absolute path to the private key used by the cocos-cli.
+# This key is used to sign commands and decrypt assets.
+cocos.cli.privateKey.path=/etc/cocos/keys/private.pem
+
+# [OPTIONAL] Absolute path to the public key used by the cocos-cli.
+# Defaults to "public.pem" in the working directory if not specified.
+cocos.cli.publicKey.path=/etc/cocos/keys/public.pem
+
+# [REQUIRED] Base URL of the Cocos Identity Hub (CW).
+# Used to fetch nonces and request verifiable presentations.
+cocos.identity.hub.url=http://identity-hub.cocos.local:8090/identity-hub
+
+# [OPTIONAL] Port for host-side CVMS (Confidential VM Service) gRPC Server.
+# The Guest Agent inside the TEE VM connects to this port to retrieve the manifest.
+# Defaults to 7002 if not specified.
+cocos.cvms.port=7002
+
+# [OPTIONAL] Trustee Key Broker Service (KBS) URL.
+# Transmitted to the Guest Agent inside the enclave for attestation/key retrieval.
+# Defaults to http://localhost:8090 if not specified.
+cocos.kbs.url=http://kbs.cocos.local:8080

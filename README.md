@@ -54,8 +54,24 @@ For details on the deployment architecture and notes, see [**UPSTREAM_DEPLOYMENT
 
 ---
 
+## ⚙️ Configuration Reference
+
+The Cocos extension modules are configured using standard Eclipse EDC properties (either in `edc.properties` or via JVM system properties `-Dproperty.name=value`).
+
+| Configuration Key | Type | Default Value | Description |
+|---|---|---|---|
+| `cocos.cli.path` | **Required** | None | Absolute path to the `cocos-cli` executable. |
+| `cocos.cli.privateKey.path` | **Required** | None | Absolute path to the private key used by the CLI (PEM format). |
+| `cocos.cli.publicKey.path` | Optional | `public.pem` | Absolute path to the public key used by the CLI (PEM format). |
+| `cocos.identity.hub.url` | **Required** | None | Base URL of the Cocos Identity Hub (CW) service. |
+| `cocos.cvms.port` | Optional | `7002` | Port on which the host-side CVMS (Confidential VM Service) gRPC server runs. |
+| `cocos.kbs.url` | Optional | `http://localhost:8090` | Trustee Key Broker Service (KBS) URL for attestation and key release. |
+
+---
+
 ## 📖 Additional Documentation
 
 For more detailed information, refer to:
 * 📐 [**ARCHITECTURE.md**](edc-extensions/ARCHITECTURE.md): System component overview, UML sequence diagrams of the multi-phase execution, and resource transfer models (Model A vs. Model B).
 * 🧪 [**E2E_TEST_GUIDE.md**](E2E_TEST_GUIDE.md): Tutorial on how to run a local integration test verifying the entire data transfer, attestation, key release, and computation loop.
+* 🛠️ [**INTEGRATION_PLAN.md**](edc-extensions/INTEGRATION_PLAN.md): Details on building and deploying the extensions, and the current implementation gaps.
