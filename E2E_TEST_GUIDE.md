@@ -124,64 +124,71 @@ qemu-system-x86_64 \
 ```
 
 ### 4. EDC Connector (dsp-tck-connector-under-test)
-First, compile the upstream connector (run from the **Connector** repository directory):
-```bash
-# Navigate to the Connector repository and build the distribution
-./gradlew installDist
-```
 
-Then, start the Java control plane runtime using JDK 17. Run this command from the root of the **cocos-edc-connector** repository directory (setting `-Dcocos.kbs.url` to the host LAN IP so the guest agent can connect back to the host KBS and pointing `cocos.cli.path` to your built or downloaded `cocos-cli` executable):
-```bash
-<path_to_jdk_17>/bin/java \
-     -Dweb.http.port=8082 \
-     -Dweb.http.protocol.port=8083 \
-     -Dweb.http.management.port=8084 \
-     -Dweb.http.control.port=8085 \
-     -Dcocos.cli.path=<path_to_cocos_cli_executable> \
-     -Dcocos.cli.privateKey.path=<path_to_cocos>/private.pem \
-     -Dcocos.cli.publicKey.path=<path_to_cocos>/public.pem \
-     -Dcocos.kbs.url=http://192.168.100.15:8080 \
-     -Dcocos.cvms.port=7003 \
-     -Dcocos.identity.hub.url=http://localhost:8090/identity-hub \
-     -cp "./system-tests/tck/dsp-tck-connector-under-test/build/install/dsp-tck-connector-under-test/lib/*" \
-     org.eclipse.edc.boot.system.runtime.BaseRuntime
-```
+Before starting the connector runtime, you must build both the Cocos extensions in this repository and the upstream Eclipse EDC Connector, and then place the Cocos extension JARs on the classpath of the connector.
 
----
-
-## 🔒 Step 2: Encrypt Assets & Prepare Manifest JSON
-
-1. **The Algorithm**: We use the already tracked Python algorithm `test/manual/algo/lin_reg.py` inside the `cocos` repository.
-2. **The Dataset**: The manual test dataset is located at `test/manual/data/iris.csv`.
-3. **Encrypt the Assets**: Run the encryption script from the root of the **cocos** repository directory:
+1. **Build Cocos EDC Extensions**:
+   Navigate to the `edc-extensions` directory and build the extension modules:
    ```bash
-   go run scripts/encrypt.go \
-          <path_to_trustee>/kbs/kbs-data/repository/default/key-local/algo-key \
-          test/manual/algo/lin_reg.py \
-          lin_reg.py.enc
+   cd edc-extensions
+   ./gradlew build packageUpstreamDropins distZip
+   cd ..
+   ```
+   This generates the Cocos extension JAR files in `edc-extensions/build/upstream-dropins/libs/`.
 
-   go run scripts/encrypt.go \
-          <path_to_trustee>/kbs/kbs-data/repository/default/key-local/dataset-key \
-          test/manual/data/iris.csv \
-          iris.csv.enc
+2. **Compile Upstream Connector**:
+   Navigate to the **Connector** repository directory and build the distribution:
+   ```bash
+   cd ../Connector # Adjust to your cloned Connector repository path
+   ./gradlew installDist
+   cd - # Return to cocos-edc-connector
+   ```
+
+3. **Install Extensions into the Runtime Classpath**:
+   Copy the built Cocos extension JARs and their dependencies into the `lib` directory of the `dsp-tck-connector-under-test` distribution so they are loaded at startup:
+   ```bash
+   cp edc-extensions/build/upstream-dropins/libs/*.jar ../Connector/system-tests/tck/dsp-tck-connector-under-test/build/install/dsp-tck-connector-under-test/lib/
+   ```
+
+4. **Start the Connector Runtime**:
+   Start the Java control plane runtime using JDK 17 from the root of the **cocos-edc-connector** repository directory (setting `-Dcocos.kbs.url` to the host LAN IP so the guest agent can connect back to the host KBS and pointing `cocos.cli.path` to your built or downloaded `cocos-cli` executable). 
+   
+   Ensure that the classpath includes the lib directory of the Connector distribution (which now contains the Cocos extensions):
+   ```bash
+   <path_to_jdk_17>/bin/java \
+        -Dweb.http.port=8082 \
+        -Dweb.http.protocol.port=8083 \
+        -Dweb.http.management.port=8084 \
+        -Dweb.http.control.port=8085 \
+        -Dcocos.cli.path=<path_to_cocos_cli_executable> \
+        -Dcocos.cli.privateKey.path=<path_to_cocos>/private.pem \
+        -Dcocos.cli.publicKey.path=<path_to_cocos>/public.pem \
+        -Dcocos.kbs.url=http://192.168.100.15:8080 \
+        -Dcocos.cvms.port=7003 \
+        -Dcocos.identity.hub.url=http://localhost:8090/identity-hub \
+        -cp "../Connector/system-tests/tck/dsp-tck-connector-under-test/build/install/dsp-tck-connector-under-test/lib/*" \
+        org.eclipse.edc.boot.system.runtime.BaseRuntime
    ```
 
 ---
 
-## 🚀 Step 3: Trigger the Computation Request
+## 🔒 Step 2: Prepare Assets & Manifest JSON
 
-Prepare and POST the manifest payload. Run these commands from the root of the **cocos** repository directory:
+For end-to-end testing, you can choose to run the computation in either **Plaintext Mode** (simplest for local testing without TEE hardware) or **Encrypted Mode** (requires a TEE environment or a KBS auth bypass configuration).
+
+### Option A: Plaintext Mode (Recommended for Local non-TEE Verification)
+You do not need to encrypt the files. The assets are uploaded directly as plaintext.
 
 ```bash
 # Read algorithm details
 ALGO_HASH=$(python3 -c "import hashlib; print(hashlib.sha3_256(open('test/manual/algo/lin_reg.py', 'rb').read()).hexdigest())")
-ALGO_BASE64=$(python3 -c "import base64; print(base64.b64encode(open('lin_reg.py.enc', 'rb').read()).decode('utf-8'))")
+ALGO_BASE64=$(python3 -c "import base64; print(base64.b64encode(open('test/manual/algo/lin_reg.py', 'rb').read()).decode('utf-8'))")
 
 # Read dataset details
 DATA_HASH=$(python3 -c "import hashlib; print(hashlib.sha3_256(open('test/manual/data/iris.csv', 'rb').read()).hexdigest())")
-DATA_BASE64=$(python3 -c "import base64; print(base64.b64encode(open('iris.csv.enc', 'rb').read()).decode('utf-8'))")
+DATA_BASE64=$(python3 -c "import base64; print(base64.b64encode(open('test/manual/data/iris.csv', 'rb').read()).decode('utf-8'))")
 
-# Construct Payload JSON
+# Construct plaintext payload JSON
 jq -n \
   --arg jobId "test-job-015" \
   --arg callback "http://localhost:8090/callback" \
@@ -207,8 +214,7 @@ jq -n \
             source: {
               type: "FILE",
               content: $algo_content,
-              encrypted: true,
-              kbsResourcePath: "default/key-local/algo-key"
+              encrypted: false
             }
           },
           datasets: [
@@ -218,8 +224,7 @@ jq -n \
               source: {
                 type: "FILE",
                 content: $data_content,
-                encrypted: true,
-                kbsResourcePath: "default/key-local/dataset-key"
+                encrypted: false
               }
             }
           ]
@@ -227,8 +232,89 @@ jq -n \
       }
     ]
   }' > payload.json
+```
 
-# Trigger computation via the EDC Management API
+---
+
+### Option B: Encrypted Mode
+1. **Encrypt the Assets**: Run the encryption script from the root of the **cocos** repository directory:
+   ```bash
+   go run scripts/encrypt.go \
+          <path_to_trustee>/kbs/kbs-data/repository/default/key-local/algo-key \
+          test/manual/algo/lin_reg.py \
+          lin_reg.py.enc
+
+   go run scripts/encrypt.go \
+          <path_to_trustee>/kbs/kbs-data/repository/default/key-local/dataset-key \
+          test/manual/data/iris.csv \
+          iris.csv.enc
+   ```
+
+2. **Prepare Encrypted Manifest JSON**:
+   ```bash
+   # Read algorithm details
+   ALGO_HASH=$(python3 -c "import hashlib; print(hashlib.sha3_256(open('test/manual/algo/lin_reg.py', 'rb').read()).hexdigest())")
+   ALGO_BASE64=$(python3 -c "import base64; print(base64.b64encode(open('lin_reg.py.enc', 'rb').read()).decode('utf-8'))")
+
+   # Read dataset details
+   DATA_HASH=$(python3 -c "import hashlib; print(hashlib.sha3_256(open('test/manual/data/iris.csv', 'rb').read()).hexdigest())")
+   DATA_BASE64=$(python3 -c "import base64; print(base64.b64encode(open('iris.csv.enc', 'rb').read()).decode('utf-8'))")
+
+   # Construct encrypted payload JSON
+   jq -n \
+     --arg jobId "test-job-015" \
+     --arg callback "http://localhost:8090/callback" \
+     --arg vmIp "127.0.0.1" \
+     --arg algo_hash "$ALGO_HASH" \
+     --arg algo_content "$ALGO_BASE64" \
+     --arg data_hash "$DATA_HASH" \
+     --arg data_content "$DATA_BASE64" \
+     '{
+       jobId: $jobId,
+       towerCallbackUrl: $callback,
+       units: [
+         {
+           vmIp: $vmIp,
+           manifest: {
+             id: $jobId,
+             name: "test-run",
+             description: "linear regression test",
+             algorithm: {
+               type: "python",
+               filename: "lin_reg.py",
+               hash: $algo_hash,
+               source: {
+                 type: "FILE",
+                 content: $algo_content,
+                 encrypted: true,
+                 kbsResourcePath: "default/key-local/algo-key"
+               }
+             },
+             datasets: [
+               {
+                 filename: "iris.csv",
+                 hash: $data_hash,
+                 source: {
+                   type: "FILE",
+                   content: $data_content,
+                   encrypted: true,
+                   kbsResourcePath: "default/key-local/dataset-key"
+                 }
+               }
+             ]
+           }
+         }
+       ]
+     }' > payload.json
+   ```
+
+---
+
+## 🚀 Step 3: Trigger the Computation Request
+
+Trigger the computation run request by POSTing the generated `payload.json` file to the EDC Connector Management API:
+
+```bash
 curl -v -X POST http://localhost:8084/api/management/cocos/computations \
   -H "Content-Type: application/json" \
   -d @payload.json
