@@ -35,3 +35,12 @@ Cargo.lock
 # Standalone EDC extension workspace
 edc-extensions/.gradle/
 edc-extensions/.jdk/
+
+# Local runtime artifacts — generated during E2E testing, not for tracking
+kbs-data/
+kbs-data
+kbs.crt
+policy.rego
+payload.json
+env/environment
+*.enc

@@ -134,8 +134,10 @@ public class CvmsGrpcServer {
                         RunResponse res = value.getRunRes();
                         if (res.getError() != null && !res.getError().isEmpty()) {
                             monitor.severe("Agent reported execution error: " + res.getError());
+                            org.eclipse.edc.connector.cocos.spi.CocosAgentCompletionRegistry.fail(clientIp, res.getError());
                         } else {
                             monitor.info("Agent reported run complete successfully");
+                            org.eclipse.edc.connector.cocos.spi.CocosAgentCompletionRegistry.complete(clientIp);
                         }
                     }
                 }

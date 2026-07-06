@@ -101,13 +101,13 @@ sequenceDiagram
     loop for each FL client
         CC_EDC->>P_EDC: GET /catalog (DSP - with Self-Issued Token)
         P_EDC->>CC_EDC: Request credentials (VP)
-        CC_EDC->>CW: Request nonce
-        CW-->>CC_EDC: Nonce
-        CC_EDC->>CVM: Request attestation report (with nonce)
+        CC_EDC->>KBS: Authenticate & request challenge nonce
+        KBS-->>CC_EDC: Nonce & Session Cookie
+        CC_EDC->>CVM: Request attestation report (with KBS nonce)
         CVM-->>CC_EDC: Attestation report
-        CC_EDC->>CW: Request VP generation (with attestation report)
-        CW->>KBS: Verify attestation report
-        KBS-->>CW: Verification status
+        CC_EDC->>KBS: Verify attestation report (with cookie)
+        KBS-->>CC_EDC: Attestation Report JWT (Status JWT)
+        CC_EDC->>CW: Request VP generation (with Status JWT & CVM IP)
         CW-->>CC_EDC: Verifiable Presentation (VP)
         CC_EDC->>P_EDC: Send VP
         P_EDC->>DLT: Verify DID & generate claims token
@@ -120,15 +120,14 @@ sequenceDiagram
     loop for each FL client
         CC_EDC->>P_EDC: contractRequest (Offer - with Self-Issued Token)
         P_EDC->>CC_EDC: Request credentials (VP)
-        CC_EDC->>CW: Request nonce
-        CW-->>CC_EDC: Nonce
-        CC_EDC->>CVM: Request attestation report (with nonce)
+        CC_EDC->>KBS: Authenticate & request challenge nonce
+        KBS-->>CC_EDC: Nonce & Session Cookie
+        CC_EDC->>CVM: Request attestation report (with KBS nonce)
         CVM-->>CC_EDC: Attestation report
-        CC_EDC->>CW: Request VP generation (with attestation report)
-        CW->>KBS: Verify attestation report
-        KBS-->>CW: Verification status
-        CC_EDC->>CW: Request VP generation
-        CW-->>CC_EDC: VP generated
+        CC_EDC->>KBS: Verify attestation report (with cookie)
+        KBS-->>CC_EDC: Attestation Report JWT (Status JWT)
+        CC_EDC->>CW: Request VP generation (with Status JWT & CVM IP)
+        CW-->>CC_EDC: Verifiable Presentation (VP)
         CC_EDC->>P_EDC: Send VP
         P_EDC->>DLT: Verify DID & generate claims token
         DLT-->>P_EDC: DID Verified
@@ -140,15 +139,14 @@ sequenceDiagram
     loop for each FL client
         CC_EDC->>P_EDC: Start Transfer Process (with Self-Issued Token)
         P_EDC->>CC_EDC: Request credentials (VP)
-        CC_EDC->>CW: Request nonce
-        CW-->>CC_EDC: Nonce
-        CC_EDC->>CVM: Request attestation report (with nonce)
+        CC_EDC->>KBS: Authenticate & request challenge nonce
+        KBS-->>CC_EDC: Nonce & Session Cookie
+        CC_EDC->>CVM: Request attestation report (with KBS nonce)
         CVM-->>CC_EDC: Attestation report
-        CC_EDC->>CW: Request VP generation (with attestation report)
-        CW->>KBS: Verify attestation report
-        KBS-->>CW: Verification status
-        CC_EDC->>CW: Request VP generation
-        CW-->>CC_EDC: VP generated
+        CC_EDC->>KBS: Verify attestation report (with cookie)
+        KBS-->>CC_EDC: Attestation Report JWT (Status JWT)
+        CC_EDC->>CW: Request VP generation (with Status JWT & CVM IP)
+        CW-->>CC_EDC: Verifiable Presentation (VP)
         CC_EDC->>P_EDC: Send VP
         P_EDC->>DLT: Verify DID & generate claims token
         DLT-->>P_EDC: DID Verified
@@ -187,10 +185,11 @@ sequenceDiagram
 4. **Phase 3, 4, 5: DSP Catalog, Negotiation, and Transfer Process**:
    - To pull remote assets (datasets or algorithms) from Provider Connectors (`P_EDC`), `CC_EDC` conducts DSP requests.
    - At each stage, the Provider requires a Verifiable Presentation (VP) to verify enclave hardware integrity:
-     - `CC_EDC` gets a nonce from the **Cocos Identity Hub (CW)**.
-     - `CC_EDC` queries the CVM agent (using `cocos-cli` as a subprocess bridge) for the attestation quote containing the nonce.
-     - The agent queries TEE hardware for the quote and returns it.
-     - `CC_EDC` exchanges this report at `CW` for a VP, which is verified against the **Key Broker Service (KBS)**.
+     - `CC_EDC` authenticates with the **Key Broker Service (KBS)** (Trustee) to receive a session cookie and challenge nonce.
+     - `CC_EDC` queries the CVM agent (using `cocos-cli` as a subprocess bridge) for the attestation report containing the KBS nonce.
+     - The agent queries TEE hardware for the report and returns it.
+     - `CC_EDC` verifies the report directly with the **KBS (Trustee)** to retrieve a signed Attestation Report JWT (Status JWT).
+     - `CC_EDC` requests the VP from the **Cocos Identity Hub (CW)** by passing this Status JWT and the CVM's IP address.
      - The VP is sent to `P_EDC` (which verifies it against the **DLT Ledger**), validating policies before transferring the data.
 
 5. **Phase 6: Computation Run & Result Collection**:
@@ -279,9 +278,10 @@ This is the standard FL Toolbox integration mode and the default when no mode is
 The **Consumer Connector** (`CC_EDC`) owns both the CVMs and the attestation flow:
 
 1. During each DSP phase (catalog, negotiation, transfer), the Provider requests a VP.
-2. `CC_EDC` gets a nonce from the Identity Hub, requests an attestation report from its own
-   CVM via `cocos-cli`, exchanges the report at the Identity Hub for a VP, and presents
-   the VP to the Provider.
+2. `CC_EDC` authenticates with the Trustee KBS to get a challenge nonce and session cookie.
+3. `CC_EDC` requests an attestation report from its own CVM via `cocos-cli` using the KBS nonce.
+4. `CC_EDC` verifies the report directly at the Trustee KBS to obtain an Attestation Report JWT (Status JWT).
+5. `CC_EDC` exchanges this Status JWT and the CVM IP at the Identity Hub for a Verifiable Presentation (VP), and presents the VP to the Provider.
 
 **Implemented by**: `AttestationBackedPresentationRequestService`
 
@@ -337,17 +337,18 @@ sequenceDiagram
 
     Note over Provider: ProviderAttestationPresentationService triggers
 
-    Provider->>PIH: Request nonce
-    PIH-->>Provider: Nonce
+    Provider->>KBS: Authenticate & request challenge nonce
+    KBS-->>Provider: Nonce & Session Cookie
 
     Provider->>Consumer: POST /api/management/cocos/computations/{jobId}/attestation
-    Consumer->>CVM: cocos-cli attestation get (gRPC :7002)
+    Consumer->>CVM: cocos-cli attestation get (gRPC :7002 - with KBS nonce)
     CVM-->>Consumer: Raw attestation report
     Consumer-->>Provider: { "attestationReport": "<base64>" }
 
-    Provider->>PIH: Exchange attestation report for VP
-    PIH->>KBS: Verify attestation report
-    KBS-->>PIH: Verification status
+    Provider->>KBS: Verify attestation report (with cookie)
+    KBS-->>Provider: Attestation Report JWT (Status JWT)
+
+    Provider->>PIH: Exchange Status JWT and CVM IP for VP
     PIH-->>Provider: Verifiable Presentation (VP)
 
     Provider->>Consumer: Present VP (via Self-Issued Token)

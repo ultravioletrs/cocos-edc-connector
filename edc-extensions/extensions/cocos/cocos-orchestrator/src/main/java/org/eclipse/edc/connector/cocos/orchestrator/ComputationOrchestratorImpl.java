@@ -10,10 +10,13 @@ import org.eclipse.edc.connector.cocos.spi.model.ComputationJob;
 import org.eclipse.edc.connector.cocos.spi.model.ComputationRequest;
 import org.eclipse.edc.connector.cocos.spi.model.ComputationUnit;
 import org.eclipse.edc.spi.monitor.Monitor;
+import org.eclipse.edc.spi.result.Result;
+import org.eclipse.edc.connector.cocos.spi.CocosAgentCompletionRegistry;
 
 import java.util.Optional;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.TimeUnit;
 
 public class ComputationOrchestratorImpl implements ComputationOrchestrator {
 
@@ -55,6 +58,19 @@ public class ComputationOrchestratorImpl implements ComputationOrchestrator {
         try {
             startAgents(job);
             uploadAssets(job);
+
+            // Wait for agent to report run complete via CVMS gRPC server event
+            for (var unit : job.getUnits()) {
+                var completionFuture = CocosAgentCompletionRegistry.getOrCreate(unit.getVmIp());
+                try {
+                    completionFuture.get(10, TimeUnit.MINUTES);
+                } catch (Exception e) {
+                    throw new RuntimeException("Computation run failed or timed out on VM " + unit.getVmIp(), e);
+                } finally {
+                    CocosAgentCompletionRegistry.remove(unit.getVmIp());
+                }
+            }
+
             collectResults(job);
             job.setStatus(ComputationJob.Status.COMPLETED);
             towerCallbackClient.reportSuccess(job);

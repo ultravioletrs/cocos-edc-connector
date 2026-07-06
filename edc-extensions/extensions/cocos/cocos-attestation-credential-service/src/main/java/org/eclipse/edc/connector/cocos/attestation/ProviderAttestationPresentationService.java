@@ -32,15 +32,21 @@ public class ProviderAttestationPresentationService implements PresentationReque
 
     private final AttestationProxyClient proxyClient;
     private final IdentityHubClient identityHubClient;
+    private final KbsClient kbsClient;
+    private final String teeType;
     private final String consumerProxyBaseUrl;
     private final Monitor monitor;
 
     public ProviderAttestationPresentationService(AttestationProxyClient proxyClient,
                                                   IdentityHubClient identityHubClient,
+                                                  KbsClient kbsClient,
+                                                  String teeType,
                                                   String consumerProxyBaseUrl,
                                                   Monitor monitor) {
         this.proxyClient = proxyClient;
         this.identityHubClient = identityHubClient;
+        this.kbsClient = kbsClient;
+        this.teeType = teeType;
         this.consumerProxyBaseUrl = consumerProxyBaseUrl;
         this.monitor = monitor;
     }
@@ -53,13 +59,14 @@ public class ProviderAttestationPresentationService implements PresentationReque
             String counterPartyToken,
             List<String> scopes) {
 
-        // Step 1: get a nonce from the Identity Hub to embed in the attestation report
-        var nonceResult = identityHubClient.requestNonce();
-        if (nonceResult.failed()) {
-            return Result.failure("Provider attestation: failed to obtain nonce from Identity Hub: "
-                    + nonceResult.getFailureDetail());
+        // Step 1: get a nonce and session cookie from the Trustee KBS
+        var authResult = kbsClient.authenticate(teeType);
+        if (authResult.failed()) {
+            return Result.failure("Provider attestation: failed to authenticate with Trustee KBS: "
+                    + authResult.getFailureDetail());
         }
-        String nonce = nonceResult.getContent();
+        String kbsNonce = authResult.getContent().getNonce();
+        String kbsSessionCookie = authResult.getContent().getSessionCookie();
 
         // Step 2: resolve active VM IP and Job ID from thread-local context
         // (set by ComputationOrchestratorImpl when dispatching the DSP request)
@@ -79,22 +86,34 @@ public class ProviderAttestationPresentationService implements PresentationReque
                 + " (job " + jobId + ") via Consumer proxy at " + consumerProxyBaseUrl);
 
         // Step 3: call the Consumer Connector's attestation proxy to get the report
-        var reportResult = proxyClient.fetchReport(consumerProxyBaseUrl, jobId, vmIp, nonce);
+        var reportResult = proxyClient.fetchReport(consumerProxyBaseUrl, jobId, vmIp, kbsNonce);
         if (reportResult.failed()) {
             return Result.failure("Provider attestation: failed to obtain attestation report via proxy: "
                     + reportResult.getFailureDetail());
         }
 
         monitor.debug("Provider attestation: obtained report for VM " + vmIp
+                + ", verifying with Trustee KBS");
+
+        // Step 4: verify attestation report at Trustee KBS to get the Status JWT
+        var verifyResult = kbsClient.verify(reportResult.getContent(), kbsNonce, kbsSessionCookie, teeType);
+        if (verifyResult.failed()) {
+            return Result.failure("Provider attestation: Trustee verification failed: "
+                    + verifyResult.getFailureDetail());
+        }
+        var statusJwt = verifyResult.getContent();
+
+        monitor.debug("Provider attestation: obtained report for VM " + vmIp
                 + ", requesting VP from Identity Hub");
 
-        // Step 4: exchange the attestation report for a VP at the Identity Hub
+        // Step 5: exchange the Status JWT for a VP at the Identity Hub
         return identityHubClient.requestPresentation(
                 participantContextId,
                 ownDid,
                 counterPartyDid,
                 counterPartyToken,
                 scopes,
-                reportResult.getContent());
+                statusJwt,
+                vmIp);
     }
 }
