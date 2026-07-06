@@ -266,3 +266,100 @@ The **direct upload model (Model A)** is used as the default out-of-the-box pipe
 
 Both Model A and Model B fully support hardware-attested decryption. Under Model A, if the computation manifest marks the uploaded algorithm or dataset as encrypted, the agent retrieves the decryption key from the KBS and decrypts the payload inside the enclave before executing the script.
 
+---
+
+## 6. Dual-Mode Attestation Presentation
+
+The `cocos-attestation-credential-service` extension supports two modes for VP generation,
+selected via the `cocos.attestation.mode` connector property.
+
+### Mode A: Consumer-Presents-VP *(default — `cocos.attestation.mode=consumer`)*
+
+This is the standard FL Toolbox integration mode and the default when no mode is configured.
+The **Consumer Connector** (`CC_EDC`) owns both the CVMs and the attestation flow:
+
+1. During each DSP phase (catalog, negotiation, transfer), the Provider requests a VP.
+2. `CC_EDC` gets a nonce from the Identity Hub, requests an attestation report from its own
+   CVM via `cocos-cli`, exchanges the report at the Identity Hub for a VP, and presents
+   the VP to the Provider.
+
+**Implemented by**: `AttestationBackedPresentationRequestService`
+
+### Mode B: Provider-Presents-VP *(`cocos.attestation.mode=provider`)*
+
+This mode supports the flow described in **D3.2 Section 7.3**, where the **Provider**
+obtains and presents the attestation-backed VC/VP. Since the Provider does not have
+direct access to the Consumer's CVM gRPC port, the Consumer Connector exposes an
+**attestation proxy API** that the Provider can call.
+
+**Attestation is always fresh** — reports are never cached, ensuring the VP always
+reflects the current live state of the TEE enclave.
+
+**Implemented by**: `ProviderAttestationPresentationService` + `AttestationProxyClientImpl`
+
+#### Attestation Proxy API (Consumer Connector)
+
+Exposed by `AttestationProxyController` on the Consumer Connector's management API:
+
+```
+POST /api/management/cocos/computations/{jobId}/attestation
+Content-Type: application/json
+
+{
+  "vmIp": "10.0.0.5",
+  "nonce": "<nonce-string>"
+}
+
+→ 200 OK
+{
+  "attestationReport": "<base64-encoded-raw-report>"
+}
+```
+
+**Validation**: The endpoint verifies that `jobId` exists in the `ComputationJobStore`
+and that `vmIp` belongs to a unit in that job, preventing unauthorized attestation requests.
+
+#### Provider-Presents-VP Sequence
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Consumer as Consumer Connector (EDC)
+    participant Provider as Provider Connector (EDC)
+    participant CVM as CVM Agent (TEE)
+    participant PIH as Identity Hub (UMU)
+    participant KBS as Key Broker Service
+
+    Note over Consumer, KBS: Mode B: Provider-Presents-VP (D3.2 §7.3)
+
+    Consumer->>Provider: GET /catalog (DSP)
+    Provider->>Consumer: Request Self-Issued Token (DCP)
+
+    Note over Provider: ProviderAttestationPresentationService triggers
+
+    Provider->>PIH: Request nonce
+    PIH-->>Provider: Nonce
+
+    Provider->>Consumer: POST /api/management/cocos/computations/{jobId}/attestation
+    Consumer->>CVM: cocos-cli attestation get (gRPC :7002)
+    CVM-->>Consumer: Raw attestation report
+    Consumer-->>Provider: { "attestationReport": "<base64>" }
+
+    Provider->>PIH: Exchange attestation report for VP
+    PIH->>KBS: Verify attestation report
+    KBS-->>PIH: Verification status
+    PIH-->>Provider: Verifiable Presentation (VP)
+
+    Provider->>Consumer: Present VP (via Self-Issued Token)
+    Consumer->>Consumer: Validate VP against attestation policy
+    Consumer-->>Provider: Accept → catalog response
+```
+
+#### Configuration Reference
+
+| Property | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `cocos.attestation.mode` | No | `consumer` | Attestation mode: `consumer` or `provider` |
+| `cocos.identity.hub.url` | Yes | — | Base URL of the Cocos/UMU Identity Hub |
+| `cocos.attestation.proxy.url` | Yes (provider mode only) | — | Base URL of the Consumer Connector management API, e.g. `http://consumer:8181/api/management` |
+

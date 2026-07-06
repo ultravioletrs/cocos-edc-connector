@@ -1,5 +1,7 @@
 package org.eclipse.edc.connector.cocos.api;
 
+import org.eclipse.edc.connector.cocos.spi.CocosCliService;
+import org.eclipse.edc.connector.cocos.spi.ComputationJobStore;
 import org.eclipse.edc.connector.cocos.spi.ComputationOrchestrator;
 import org.eclipse.edc.runtime.metamodel.annotation.Extension;
 import org.eclipse.edc.runtime.metamodel.annotation.Inject;
@@ -18,6 +20,12 @@ public class ComputationApiExtension implements ServiceExtension {
     @Inject
     private ComputationOrchestrator orchestrator;
 
+    @Inject
+    private CocosCliService cliService;
+
+    @Inject
+    private ComputationJobStore jobStore;
+
     @Override
     public String name() {
         return NAME;
@@ -25,6 +33,7 @@ public class ComputationApiExtension implements ServiceExtension {
 
     @Override
     public void initialize(ServiceExtensionContext context) {
-        webService.registerResource("management", new ComputationApiController(orchestrator));
+        webService.registerResource("management",
+                new ComputationApiController(orchestrator, cliService, jobStore, context.getMonitor()));
     }
 }

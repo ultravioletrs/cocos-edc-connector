@@ -80,16 +80,16 @@ public class ComputationOrchestratorImpl implements ComputationOrchestrator {
     private void uploadAssets(ComputationJob job) {
         job.setStatus(ComputationJob.Status.UPLOADING);
         for (var unit : job.getUnits()) {
-            uploadUnitAssets(unit);
+            uploadUnitAssets(job.getJobId(), unit);
         }
     }
 
-    private void uploadUnitAssets(ComputationUnit unit) {
+    private void uploadUnitAssets(String jobId, ComputationUnit unit) {
         var manifest = unit.getManifest();
 
         var algo = manifest.getAlgorithm();
         if (algo != null) {
-            byte[] data = resolveAsset(unit.getVmIp(), algo.getSource(), algo.getProviderConnectorUrl());
+            byte[] data = resolveAsset(unit.getVmIp(), jobId, algo.getSource(), algo.getProviderConnectorUrl());
             var result = cliService.uploadAlgorithm(unit.getVmIp(), algo.getFilename(), data);
             if (result.failed()) {
                 throw new RuntimeException("Failed to upload algorithm " + algo.getFilename()
@@ -98,7 +98,7 @@ public class ComputationOrchestratorImpl implements ComputationOrchestrator {
         }
 
         for (var dataset : manifest.getDatasets()) {
-            byte[] data = resolveAsset(unit.getVmIp(), dataset.getSource(), dataset.getProviderConnectorUrl());
+            byte[] data = resolveAsset(unit.getVmIp(), jobId, dataset.getSource(), dataset.getProviderConnectorUrl());
             var result = cliService.uploadDataset(unit.getVmIp(), dataset.getFilename(), data);
             if (result.failed()) {
                 throw new RuntimeException("Failed to upload dataset " + dataset.getFilename()
@@ -107,14 +107,23 @@ public class ComputationOrchestratorImpl implements ComputationOrchestrator {
         }
     }
 
-    private byte[] resolveAsset(String vmIp, AssetSource source, String providerConnectorUrl) {
+
+
+    private byte[] resolveAsset(String vmIp, String jobId, AssetSource source, String providerConnectorUrl) {
         if (source.getType() == AssetSource.Type.FILE) {
             if (source.getContent() == null) {
                 return new byte[0];
             }
             return java.util.Base64.getDecoder().decode(source.getContent().trim());
         }
+        // Propagate VM IP and job ID into the thread-local context so that both
+        // AttestationBackedPresentationRequestService (consumer mode) and
+        // ProviderAttestationPresentationService (provider mode) can resolve them
+        // when generating attestation-backed VPs during the DSP credential exchange.
         CocosContextHolder.setActiveVmIp(vmIp);
+        if (jobId != null) {
+            CocosContextHolder.setActiveJobId(jobId);
+        }
         try {
             return remoteAssetFetcher.fetch(providerConnectorUrl, source.getUrl()).get();
         } catch (InterruptedException e) {
