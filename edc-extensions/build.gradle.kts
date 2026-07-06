@@ -45,7 +45,10 @@ val packageUpstreamDropins by tasks.registering(Sync::class) {
             from(project(projectPath).configurations.getByName("runtimeClasspath")) {
                 exclude { details ->
                     val name = details.file.name
-                    name.contains("jackson-") || name.contains("edc-") || name.contains("jersey-") || name.contains("jetty-")
+                    // Exclude EDC core libraries – always provided by the upstream connector runtime
+                    name.contains("jackson-") || name.contains("edc-") ||
+                    name.contains("jersey-") || name.contains("jetty-") ||
+                    name.startsWith("runtime-metamodel") || name.startsWith("connector-core")
                 }
             }
         }

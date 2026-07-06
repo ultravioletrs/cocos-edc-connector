@@ -29,8 +29,9 @@ public class IdentityHubClientImpl implements IdentityHubClient {
             String counterPartyDid,
             String counterPartyToken,
             List<String> scopes,
-            byte[] attestationReport) {
-        // TODO: implement POST {identityHubBaseUrl}/presentations with attestation report when CW API is finalised
+            String attestationJwt,
+            String vmIp) {
+        // TODO: implement POST {identityHubBaseUrl}/presentations with attestation JWT and vmIp when CW API is finalised
         return Result.failure("Identity Hub presentation API not yet implemented — pending CW API finalisation");
     }
 }

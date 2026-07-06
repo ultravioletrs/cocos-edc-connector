@@ -16,5 +16,6 @@ public interface IdentityHubClient {
             String counterPartyDid,
             String counterPartyToken,
             List<String> scopes,
-            byte[] attestationReport);
+            String attestationJwt,
+            String vmIp);
 }

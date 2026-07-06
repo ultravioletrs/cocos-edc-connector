@@ -42,8 +42,7 @@ public class CocosAttestationExtension implements ServiceExtension {
     @Setting(description = "Base URL of the CocosAI Identity Hub (CW)", key = "cocos.identity.hub.url", required = true)
     private String identityHubUrl;
 
-    /**
-     * Base URL of the Consumer Connector's management API.
+    /** Base URL of the Consumer Connector's management API.
      * Required only when {@code cocos.attestation.mode=provider}.
      * Example: {@code http://consumer-connector:8181/api/management}
      */
@@ -52,6 +51,18 @@ public class CocosAttestationExtension implements ServiceExtension {
              key = "cocos.attestation.proxy.url",
              required = false)
     private String attestationProxyUrl;
+
+    /** Base URL of the Trustee Key Broker Service (KBS). */
+    @Setting(description = "Base URL of the Trustee Key Broker Service (KBS)",
+             key = "cocos.kbs.url",
+             defaultValue = "http://localhost:8080")
+    private String kbsUrl;
+
+    /** TEE Platform type: snp or sample. */
+    @Setting(description = "TEE Platform type: snp or sample",
+             key = "cocos.tee.type",
+             defaultValue = "snp")
+    private String teeType;
 
     @Inject
     private CocosCliService cliService;
@@ -67,6 +78,7 @@ public class CocosAttestationExtension implements ServiceExtension {
     @Provider
     public PresentationRequestService presentationRequestService(ServiceExtensionContext context) {
         var identityHubClient = new IdentityHubClientImpl(httpClient, identityHubUrl);
+        var kbsClient = new KbsClientImpl(httpClient, new ObjectMapper(), kbsUrl);
 
         if ("provider".equalsIgnoreCase(attestationMode)) {
             if (attestationProxyUrl == null || attestationProxyUrl.isBlank()) {
@@ -77,12 +89,12 @@ public class CocosAttestationExtension implements ServiceExtension {
                     + "attestation will be fetched via Consumer proxy at " + attestationProxyUrl);
             var proxyClient = new AttestationProxyClientImpl(httpClient, new ObjectMapper());
             return new ProviderAttestationPresentationService(
-                    proxyClient, identityHubClient, attestationProxyUrl, context.getMonitor());
+                    proxyClient, identityHubClient, kbsClient, teeType, attestationProxyUrl, context.getMonitor());
         }
 
         // Default: consumer mode
         context.getMonitor().info(NAME + ": running in CONSUMER mode — "
-                + "attestation will be fetched directly from CVMs");
-        return new AttestationBackedPresentationRequestService(cliService, identityHubClient, context.getMonitor());
+                + "attestation will be fetched directly from CVMs and verified at KBS");
+        return new AttestationBackedPresentationRequestService(cliService, identityHubClient, kbsClient, teeType, context.getMonitor());
     }
 }

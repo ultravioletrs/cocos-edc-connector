@@ -22,7 +22,7 @@ Inside the `edc-extensions` directory, the following Gradle tasks coordinate com
 Other development partners must implement the following components before the Cocos connector can be fully operational.
 
 ### Gap A: DSP Consumer Flow (`StubRemoteAssetFetcher`)
-* **Target File**: [StubRemoteAssetFetcher.java](file:///home/sammyk/Documents/cocos-edc-connector/edc-extensions/extensions/cocos/cocos-orchestrator/src/main/java/org/eclipse/edc/connector/cocos/orchestrator/StubRemoteAssetFetcher.java)
+* **Target File**: [StubRemoteAssetFetcher.java](extensions/cocos/cocos-orchestrator/src/main/java/org/eclipse/edc/connector/cocos/orchestrator/StubRemoteAssetFetcher.java)
 * **Status**: Currently a stub returning `CompletableFuture.failedFuture(new UnsupportedOperationException())`.
 * **Objective**: Resolve remote assets specified with `AssetSource.Type.REMOTE` in the computation manifest.
 * **Required Flow to Build**:
@@ -33,21 +33,74 @@ Other development partners must implement the following components before the Co
 
 ---
 
-### Gap B: Identity Hub Nonce & Presentation APIs (`IdentityHubClientImpl`)
-* **Target File**: [IdentityHubClientImpl.java](file:///home/sammyk/Documents/cocos-edc-connector/edc-extensions/extensions/cocos/cocos-attestation-credential-service/src/main/java/org/eclipse/edc/connector/cocos/attestation/IdentityHubClientImpl.java)
-* **Status**: Both methods (`getNonce` and `getVerifiablePresentation`) return `Result.failure("not yet implemented")`.
-* **Objective**: Interface with the Cocos Identity Hub (CW) APIs to validate hardware attestation reports and fetch credentials.
+### Gap B: Identity Hub Presentation APIs (`IdentityHubClientImpl`)
+* **Target File**: [IdentityHubClientImpl.java](extensions/cocos/cocos-attestation-credential-service/src/main/java/org/eclipse/edc/connector/cocos/attestation/IdentityHubClientImpl.java)
+* **Status**: Method (`requestPresentation`) returns `Result.failure("not yet implemented")`.
+* **Objective**: Interface with the UMU Attestation Credential Service APIs to fetch Verifiable Presentations.
 * **Required Flow to Build**:
-  1. **GET Nonce**: Send a HTTP GET request to `{identityHubBaseUrl}/nonce`. Extract the nonce string from the response and return as `Result<String>`.
-  2. **POST Presentation**: Send a HTTP POST request to `{identityHubBaseUrl}/presentations` containing the hardware attestation report/quote. Return the Verifiable Presentation (VP) token/string as `Result<String>`.
+  1. **POST Presentation**: Send a HTTP POST request to `{identityHubBaseUrl}/presentations` containing the Status JWT (obtained from Trustee KBS) and the CVM info (IP address). Return the Verifiable Presentation (VP) container list as `Result<List<VerifiablePresentationContainer>>`.
 
 ---
 
 ### Gap C: Unit Testing Coverage
-* **Target Location**: No `src/test/java` directories currently exist in the codebase.
-* **Objective**: Set up JUnit 5 + Mockito test suites.
-* **Prioritized Areas for Test Coverage**:
+* **Target Location**: `src/test/java` directories
+* **Status**: Partially Addressed (JUnit 5 + Mockito + AssertJ test framework configured and integrated).
+* **TCK Runtime Note**: `cocos-attestation-credential-service` requires `decentralized-claims-spi` from the EDC DCP/Identity Hub module. The bare TCK control plane does **not** ship this SPI. When deploying to the TCK connector for E2E testing, exclude this JAR from the runtime lib directory. It should only be deployed against a full DCP-capable connector.
+* **Completed Tests**:
+  - [AttestationBackedPresentationRequestServiceTest](extensions/cocos/cocos-attestation-credential-service/src/test/java/org/eclipse/edc/connector/cocos/attestation/AttestationBackedPresentationRequestServiceTest.java): Verifies the authentication and verification sequences against the Trustee KBS.
+* **Remaining Areas for Test Coverage**:
   1. **`ComputationOrchestratorImpl`**: Test the orchestration lifecycle state machine (start agents, upload assets, wait for completion, collect results).
   2. **`CvmsGrpcServer`**: Test the bidirectional gRPC stream handler (receiving enclaves registration, sending manifest, forwarding logs).
   3. **`CocosCliServiceImpl`**: Mock subprocess execution and verify CLI argument construction for different commands.
-  4. **`AttestationBackedPresentationRequestService`**: Mock Identity Hub responses and verify attestation-backed credential flow.
+
+---
+
+## ✅ 3. Implemented: Event-Driven Orchestration (CVMS gRPC Stream)
+
+The computation orchestrator now uses the **CVMS bidirectional gRPC stream** to synchronize execution rather than polling.
+
+### Design
+
+The `CvmsGrpcServer` maintains a persistent bidirectional gRPC stream with each connected agent. The agent pushes events (`AgentLog`, `AgentEvent`, `RunResponse`) over this stream in real time. The previous implementation discarded `RunResponse` without signaling the orchestrator thread.
+
+### Components
+
+* **[CocosAgentCompletionRegistry](extensions/cocos/cocos-spi/src/main/java/org/eclipse/edc/connector/cocos/spi/CocosAgentCompletionRegistry.java)** *(NEW)*:
+  A static `ConcurrentHashMap<String, CompletableFuture<Void>>` keyed by VM IP. Provides three operations:
+  - `getOrCreate(vmIp)` — called by the orchestrator thread before dispatching the manifest; returns a future it will block on.
+  - `complete(vmIp)` — called by the gRPC server thread when `RunResponse` arrives with no error.
+  - `fail(vmIp, error)` — called by the gRPC server thread when `RunResponse` contains an error string.
+
+* **[CvmsGrpcServer](extensions/cocos/cocos-orchestrator/src/main/java/org/eclipse/edc/connector/cocos/orchestrator/CvmsGrpcServer.java)** *(MODIFIED)*:
+  `onNext(ClientStreamMessage)` now signals the registry when `RunResponse` is received:
+  ```java
+  } else if (value.hasRunRes()) {
+      RunResponse res = value.getRunRes();
+      if (res.getError() != null && !res.getError().isEmpty()) {
+          CocosAgentCompletionRegistry.fail(clientIp, res.getError());
+      } else {
+          CocosAgentCompletionRegistry.complete(clientIp);
+      }
+  }
+  ```
+
+* **[ComputationOrchestratorImpl](extensions/cocos/cocos-orchestrator/src/main/java/org/eclipse/edc/connector/cocos/orchestrator/ComputationOrchestratorImpl.java)** *(MODIFIED)*:
+  After uploading assets, the orchestrator thread blocks on the completion future (with a 10-minute timeout) before fetching results exactly once:
+  ```java
+  var completionFuture = CocosAgentCompletionRegistry.getOrCreate(unit.getVmIp());
+  completionFuture.get(10, TimeUnit.MINUTES);
+  // Only reached after RunResponse event — no polling needed
+  cliService.fetchResult(unit.getVmIp());
+  ```
+
+### Verified Execution
+The full E2E run confirmed the correct event-driven sequencing in the connector logs:
+```
+INFO Registered manifest in CVMS registry for VM IP: 192.168.100.15
+INFO Sending computation run request to agent 192.168.100.15
+INFO Agent reported run complete successfully
+```
+Status API confirmed completion:
+```json
+{"status":"COMPLETED","jobId":"test-job-015"}
+```
