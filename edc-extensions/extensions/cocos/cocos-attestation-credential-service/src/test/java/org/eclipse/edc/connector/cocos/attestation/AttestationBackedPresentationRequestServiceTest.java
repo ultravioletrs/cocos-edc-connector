@@ -21,7 +21,7 @@ import static org.mockito.Mockito.when;
 class AttestationBackedPresentationRequestServiceTest {
 
     private final CocosCliService cliService = mock(CocosCliService.class);
-    private final IdentityHubClient identityHubClient = mock(IdentityHubClient.class);
+    private final AttestationCredentialServiceClient client = mock(AttestationCredentialServiceClient.class);
     private final KbsClient kbsClient = mock(KbsClient.class);
     private final Monitor monitor = mock(Monitor.class);
     private final String teeType = "snp";
@@ -31,7 +31,7 @@ class AttestationBackedPresentationRequestServiceTest {
     @BeforeEach
     void setUp() {
         service = new AttestationBackedPresentationRequestService(
-                cliService, identityHubClient, kbsClient, teeType, monitor);
+                cliService, client, kbsClient, teeType, monitor);
     }
 
     @AfterEach
@@ -59,8 +59,8 @@ class AttestationBackedPresentationRequestServiceTest {
         // Mock Trustee Verification
         when(kbsClient.verify(rawReport, kbsNonce, sessionCookie, teeType)).thenReturn(Result.success(statusJwt));
 
-        // Mock Identity Hub VP Presentation Request
-        when(identityHubClient.requestPresentation(
+        // Mock Attestation Credential Service VP Presentation Request
+        when(client.requestPresentation(
                 eq("context-id"), eq("own-did"), eq("counter-did"), eq("counter-token"), any(), eq(statusJwt), eq(vmIp)))
                 .thenReturn(Result.success(List.of()));
 
@@ -73,7 +73,7 @@ class AttestationBackedPresentationRequestServiceTest {
         verify(kbsClient).authenticate(teeType);
         verify(cliService).requestAttestation(vmIp, kbsNonce);
         verify(kbsClient).verify(rawReport, kbsNonce, sessionCookie, teeType);
-        verify(identityHubClient).requestPresentation(
+        verify(client).requestPresentation(
                 "context-id", "own-did", "counter-did", "counter-token", List.of("scope1"), statusJwt, vmIp);
     }
 

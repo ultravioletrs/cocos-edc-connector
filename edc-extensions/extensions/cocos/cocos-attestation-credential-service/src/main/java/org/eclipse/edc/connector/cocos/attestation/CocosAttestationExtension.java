@@ -38,8 +38,12 @@ public class CocosAttestationExtension implements ServiceExtension {
              defaultValue = "consumer")
     private String attestationMode;
 
-    /** Base URL of the Cocos Identity Hub. Required in both modes. */
-    @Setting(description = "Base URL of the CocosAI Identity Hub (CW)", key = "cocos.identity.hub.url", required = true)
+    /** Base URL of the CocosAI Attestation Credential Service. */
+    @Setting(description = "Base URL of the CocosAI Attestation Credential Service", key = "cocos.attestation.credential.service.url", required = false)
+    private String attestationCredentialServiceUrl;
+
+    /** Base URL of the Cocos Identity Hub. Required if cocos.attestation.credential.service.url is not set. */
+    @Setting(description = "Base URL of the CocosAI Identity Hub (CW) [Deprecated - use cocos.attestation.credential.service.url]", key = "cocos.identity.hub.url", required = false)
     private String identityHubUrl;
 
     /** Base URL of the Consumer Connector's management API.
@@ -48,8 +52,8 @@ public class CocosAttestationExtension implements ServiceExtension {
      */
     @Setting(description = "Base URL of the Consumer Connector's management API for the attestation proxy. "
             + "Required when cocos.attestation.mode=provider.",
-             key = "cocos.attestation.proxy.url",
-             required = false)
+              key = "cocos.attestation.proxy.url",
+              required = false)
     private String attestationProxyUrl;
 
     /** Base URL of the Trustee Key Broker Service (KBS). */
@@ -77,7 +81,16 @@ public class CocosAttestationExtension implements ServiceExtension {
 
     @Provider
     public PresentationRequestService presentationRequestService(ServiceExtensionContext context) {
-        var identityHubClient = new IdentityHubClientImpl(httpClient, identityHubUrl);
+        String serviceUrl = attestationCredentialServiceUrl;
+        if (serviceUrl == null || serviceUrl.isBlank()) {
+            serviceUrl = identityHubUrl;
+        }
+        if (serviceUrl == null || serviceUrl.isBlank()) {
+            throw new IllegalStateException(
+                    "Either 'cocos.attestation.credential.service.url' or 'cocos.identity.hub.url' must be configured.");
+        }
+
+        var client = new AttestationCredentialServiceClientImpl(httpClient, new ObjectMapper(), serviceUrl);
         var kbsClient = new KbsClientImpl(httpClient, new ObjectMapper(), kbsUrl);
 
         if ("provider".equalsIgnoreCase(attestationMode)) {
@@ -89,12 +102,12 @@ public class CocosAttestationExtension implements ServiceExtension {
                     + "attestation will be fetched via Consumer proxy at " + attestationProxyUrl);
             var proxyClient = new AttestationProxyClientImpl(httpClient, new ObjectMapper());
             return new ProviderAttestationPresentationService(
-                    proxyClient, identityHubClient, kbsClient, teeType, attestationProxyUrl, context.getMonitor());
+                    proxyClient, client, kbsClient, teeType, attestationProxyUrl, context.getMonitor());
         }
 
         // Default: consumer mode
         context.getMonitor().info(NAME + ": running in CONSUMER mode — "
                 + "attestation will be fetched directly from CVMs and verified at KBS");
-        return new AttestationBackedPresentationRequestService(cliService, identityHubClient, kbsClient, teeType, context.getMonitor());
+        return new AttestationBackedPresentationRequestService(cliService, client, kbsClient, teeType, context.getMonitor());
     }
 }
