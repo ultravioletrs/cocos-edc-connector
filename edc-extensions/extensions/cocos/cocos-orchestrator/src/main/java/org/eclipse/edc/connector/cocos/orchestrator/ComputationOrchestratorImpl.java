@@ -56,6 +56,11 @@ public class ComputationOrchestratorImpl implements ComputationOrchestrator {
 
     private void runJob(ComputationJob job) {
         try {
+            // Pre-create the completion future to prevent race conditions where agent completes before future is created
+            for (var unit : job.getUnits()) {
+                CocosAgentCompletionRegistry.getOrCreate(unit.getVmIp());
+            }
+
             startAgents(job);
             uploadAssets(job);
 

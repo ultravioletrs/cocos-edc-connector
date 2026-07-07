@@ -82,13 +82,24 @@ public class CvmsGrpcServer {
             monitor.info("Agent connected to CVMS from IP: " + clientIp + ", waiting for manifest...");
 
             ComputeManifest manifest = null;
+            String registryKey = null;
             for (int i = 0; i < 60; i++) {
                 manifest = CocosManifestRegistry.get(clientIp);
-                if (manifest == null) {
-                    manifest = CocosManifestRegistry.get("127.0.0.1");
-                }
                 if (manifest != null) {
+                    registryKey = clientIp;
                     break;
+                }
+                // Fall back to whatever key the orchestrator registered the manifest under.
+                // This covers the SSH-tunnel case where the orchestrator sees 127.0.0.1 as
+                // the vmIp, but also any other pre-registered key if the agent connects from
+                // a different IP than what was recorded in the manifest payload.
+                String fallbackKey = CocosManifestRegistry.findKeyForAnyManifest();
+                if (fallbackKey != null) {
+                    manifest = CocosManifestRegistry.get(fallbackKey);
+                    if (manifest != null) {
+                        registryKey = fallbackKey;
+                        break;
+                    }
                 }
                 try {
                     Thread.sleep(500);
@@ -121,7 +132,11 @@ public class CvmsGrpcServer {
                 responseObserver.onError(e);
             }
 
+            // Snapshot into final locals so the anonymous StreamObserver can capture them.
+            final String resolvedKey = registryKey != null ? registryKey : clientIp;
+
             return new StreamObserver<ClientStreamMessage>() {
+
                 @Override
                 public void onNext(ClientStreamMessage value) {
                     if (value.hasAgentLog()) {
@@ -134,10 +149,14 @@ public class CvmsGrpcServer {
                         RunResponse res = value.getRunRes();
                         if (res.getError() != null && !res.getError().isEmpty()) {
                             monitor.severe("Agent reported execution error: " + res.getError());
-                            org.eclipse.edc.connector.cocos.spi.CocosAgentCompletionRegistry.fail(clientIp, res.getError());
+                            // Signal under the same key the orchestrator is waiting on.
+                            org.eclipse.edc.connector.cocos.spi.CocosAgentCompletionRegistry.fail(
+                                    resolvedKey, res.getError());
                         } else {
                             monitor.info("Agent reported run complete successfully");
-                            org.eclipse.edc.connector.cocos.spi.CocosAgentCompletionRegistry.complete(clientIp);
+                            // Signal under the same key the orchestrator is waiting on.
+                            org.eclipse.edc.connector.cocos.spi.CocosAgentCompletionRegistry.complete(
+                                    resolvedKey);
                         }
                     }
                 }
