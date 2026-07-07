@@ -31,20 +31,20 @@ import java.util.List;
 public class ProviderAttestationPresentationService implements PresentationRequestService {
 
     private final AttestationProxyClient proxyClient;
-    private final IdentityHubClient identityHubClient;
+    private final AttestationCredentialServiceClient client;
     private final KbsClient kbsClient;
     private final String teeType;
     private final String consumerProxyBaseUrl;
     private final Monitor monitor;
 
     public ProviderAttestationPresentationService(AttestationProxyClient proxyClient,
-                                                  IdentityHubClient identityHubClient,
+                                                  AttestationCredentialServiceClient client,
                                                   KbsClient kbsClient,
                                                   String teeType,
                                                   String consumerProxyBaseUrl,
                                                   Monitor monitor) {
         this.proxyClient = proxyClient;
-        this.identityHubClient = identityHubClient;
+        this.client = client;
         this.kbsClient = kbsClient;
         this.teeType = teeType;
         this.consumerProxyBaseUrl = consumerProxyBaseUrl;
@@ -107,7 +107,7 @@ public class ProviderAttestationPresentationService implements PresentationReque
                 + ", requesting VP from Identity Hub");
 
         // Step 5: exchange the Status JWT for a VP at the Identity Hub
-        return identityHubClient.requestPresentation(
+        return client.requestPresentation(
                 participantContextId,
                 ownDid,
                 counterPartyDid,

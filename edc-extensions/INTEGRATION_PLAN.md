@@ -33,12 +33,12 @@ Other development partners must implement the following components before the Co
 
 ---
 
-### Gap B: Identity Hub Presentation APIs (`IdentityHubClientImpl`)
-* **Target File**: [IdentityHubClientImpl.java](extensions/cocos/cocos-attestation-credential-service/src/main/java/org/eclipse/edc/connector/cocos/attestation/IdentityHubClientImpl.java)
-* **Status**: Method (`requestPresentation`) returns `Result.failure("not yet implemented")`.
+### Gap B: Identity Hub Presentation APIs (Resolved)
+* **Target File**: [AttestationCredentialServiceClientImpl.java](extensions/cocos/cocos-attestation-credential-service/src/main/java/org/eclipse/edc/connector/cocos/attestation/AttestationCredentialServiceClientImpl.java)
+* **Status**: **RESOLVED**. Implemented to communicate with the Attestation Credential Service at `/attestation-cred-service/parse`.
 * **Objective**: Interface with the UMU Attestation Credential Service APIs to fetch Verifiable Presentations.
-* **Required Flow to Build**:
-  1. **POST Presentation**: Send a HTTP POST request to `{identityHubBaseUrl}/presentations` containing the Status JWT (obtained from Trustee KBS) and the CVM info (IP address). Return the Verifiable Presentation (VP) container list as `Result<List<VerifiablePresentationContainer>>`.
+* **Required Flow**:
+  1. **POST Presentation**: Send a HTTP POST request to `{baseUrl}/attestation-cred-service/parse` containing the Status JWT (obtained from Trustee KBS). Return the Verifiable Presentation (VP) container list as `Result<List<VerifiablePresentationContainer>>`.
 
 ---
 

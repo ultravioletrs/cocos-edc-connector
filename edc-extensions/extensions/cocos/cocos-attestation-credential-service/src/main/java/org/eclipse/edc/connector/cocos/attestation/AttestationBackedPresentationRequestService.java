@@ -12,18 +12,18 @@ import java.util.List;
 public class AttestationBackedPresentationRequestService implements PresentationRequestService {
 
     private final CocosCliService cliService;
-    private final IdentityHubClient identityHubClient;
+    private final AttestationCredentialServiceClient client;
     private final KbsClient kbsClient;
     private final String teeType;
     private final Monitor monitor;
 
     public AttestationBackedPresentationRequestService(CocosCliService cliService,
-                                                       IdentityHubClient identityHubClient,
+                                                       AttestationCredentialServiceClient client,
                                                        KbsClient kbsClient,
                                                        String teeType,
                                                        Monitor monitor) {
         this.cliService = cliService;
-        this.identityHubClient = identityHubClient;
+        this.client = client;
         this.kbsClient = kbsClient;
         this.teeType = teeType;
         this.monitor = monitor;
@@ -69,7 +69,7 @@ public class AttestationBackedPresentationRequestService implements Presentation
         monitor.debug("Attestation report verified with Trustee KBS, requesting VP from Identity Hub");
 
         // 4. Request Verifiable Presentation from UMU Attestation Credential Service using Status JWT and CVM IP
-        return identityHubClient.requestPresentation(
+        return client.requestPresentation(
                 participantContextId,
                 ownDid,
                 counterPartyDid,

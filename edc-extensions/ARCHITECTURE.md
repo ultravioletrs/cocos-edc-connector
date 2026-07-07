@@ -22,7 +22,7 @@ graph TD
     end
 
     subgraph CocosTrust["CocosAI Trust Domain (Cocos AI Controlled)"]
-        CW["Cocos Identity Hub<br>(DIDS + STS + Wallet)"]
+        ACS["Attestation Credential Service<br>(Credential Request / Issuance)"]
         KBS["Key Broker Service (Trustee)<br>(Decryption Keys & Attestation Verification)"]
     end
 
@@ -56,8 +56,8 @@ graph TD
     end
 
     TC -->|Phase 1: Provisions & configures CVMs via cloud-init| CocosAgentGo
-    CC_EDC -->|Request VP with Attestation| CW
-    CW -->|Verify TEE Report| KBS
+    CC_EDC -->|Request VP with Attestation| ACS
+    ACS -->|Verify TEE Report| KBS
     CC_EDC -->|Sends VP / SI-Token| P_EDC
     P_EDC -->|Verify DID & Claims| DLT
 ```
@@ -76,7 +76,7 @@ sequenceDiagram
     participant TC as Tower Connector (EDC)
     participant CVM as FL Server/Client VMs (CVM)
     participant CC_EDC as CocosAI Connector EDC
-    participant CW as Cocos Identity Hub (DID/STS/Wallet)
+    participant ACS as Attestation Credential Service
     participant KBS as Key Broker Service
     participant P_EDC as Provider Connector EDC
     participant DLT as DLT (Ledger)
@@ -107,8 +107,8 @@ sequenceDiagram
         CVM-->>CC_EDC: Attestation report
         CC_EDC->>KBS: Verify attestation report (with cookie)
         KBS-->>CC_EDC: Attestation Report JWT (Status JWT)
-        CC_EDC->>CW: Request VP generation (with Status JWT & CVM IP)
-        CW-->>CC_EDC: Verifiable Presentation (VP)
+        CC_EDC->>ACS: Request VP generation (with Status JWT & CVM IP)
+        ACS-->>CC_EDC: Verifiable Presentation (VP)
         CC_EDC->>P_EDC: Send VP
         P_EDC->>DLT: Verify DID & generate claims token
         DLT-->>P_EDC: DID Verified
@@ -126,8 +126,8 @@ sequenceDiagram
         CVM-->>CC_EDC: Attestation report
         CC_EDC->>KBS: Verify attestation report (with cookie)
         KBS-->>CC_EDC: Attestation Report JWT (Status JWT)
-        CC_EDC->>CW: Request VP generation (with Status JWT & CVM IP)
-        CW-->>CC_EDC: Verifiable Presentation (VP)
+        CC_EDC->>ACS: Request VP generation (with Status JWT & CVM IP)
+        ACS-->>CC_EDC: Verifiable Presentation (VP)
         CC_EDC->>P_EDC: Send VP
         P_EDC->>DLT: Verify DID & generate claims token
         DLT-->>P_EDC: DID Verified
@@ -145,8 +145,8 @@ sequenceDiagram
         CVM-->>CC_EDC: Attestation report
         CC_EDC->>KBS: Verify attestation report (with cookie)
         KBS-->>CC_EDC: Attestation Report JWT (Status JWT)
-        CC_EDC->>CW: Request VP generation (with Status JWT & CVM IP)
-        CW-->>CC_EDC: Verifiable Presentation (VP)
+        CC_EDC->>ACS: Request VP generation (with Status JWT & CVM IP)
+        ACS-->>CC_EDC: Verifiable Presentation (VP)
         CC_EDC->>P_EDC: Send VP
         P_EDC->>DLT: Verify DID & generate claims token
         DLT-->>P_EDC: DID Verified
@@ -189,7 +189,7 @@ sequenceDiagram
      - `CC_EDC` queries the CVM agent (using `cocos-cli` as a subprocess bridge) for the attestation report containing the KBS nonce.
      - The agent queries TEE hardware for the report and returns it.
      - `CC_EDC` verifies the report directly with the **KBS (Trustee)** to retrieve a signed Attestation Report JWT (Status JWT).
-     - `CC_EDC` requests the VP from the **Cocos Identity Hub (CW)** by passing this Status JWT and the CVM's IP address.
+     - `CC_EDC` requests the VP from the **Attestation Credential Service (ACS)** by passing this Status JWT.
      - The VP is sent to `P_EDC` (which verifies it against the **DLT Ledger**), validating policies before transferring the data.
 
 5. **Phase 6: Computation Run & Result Collection**:
@@ -327,7 +327,7 @@ sequenceDiagram
     participant Consumer as Consumer Connector (EDC)
     participant Provider as Provider Connector (EDC)
     participant CVM as CVM Agent (TEE)
-    participant PIH as Identity Hub (UMU)
+    participant ACS as Attestation Credential Service (UMU)
     participant KBS as Key Broker Service
 
     Note over Consumer, KBS: Mode B: Provider-Presents-VP (D3.2 §7.3)
@@ -348,8 +348,8 @@ sequenceDiagram
     Provider->>KBS: Verify attestation report (with cookie)
     KBS-->>Provider: Attestation Report JWT (Status JWT)
 
-    Provider->>PIH: Exchange Status JWT and CVM IP for VP
-    PIH-->>Provider: Verifiable Presentation (VP)
+    Provider->>ACS: Exchange Status JWT for VP
+    ACS-->>Provider: Verifiable Presentation (VP)
 
     Provider->>Consumer: Present VP (via Self-Issued Token)
     Consumer->>Consumer: Validate VP against attestation policy
@@ -361,6 +361,7 @@ sequenceDiagram
 | Property | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `cocos.attestation.mode` | No | `consumer` | Attestation mode: `consumer` or `provider` |
-| `cocos.identity.hub.url` | Yes | — | Base URL of the Cocos/UMU Identity Hub |
+| `cocos.attestation.credential.service.url` | Yes (or fallback) | — | Base URL of the Cocos/UMU Attestation Credential Service |
+| `cocos.identity.hub.url` | Deprecated | — | Base URL of the Cocos/UMU Identity Hub (used as fallback) |
 | `cocos.attestation.proxy.url` | Yes (provider mode only) | — | Base URL of the Consumer Connector management API, e.g. `http://consumer:8181/api/management` |
 
