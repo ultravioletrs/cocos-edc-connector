@@ -12,11 +12,12 @@ import org.eclipse.edc.connector.cocos.spi.model.ComputationUnit;
 import org.eclipse.edc.spi.monitor.Monitor;
 import org.eclipse.edc.spi.result.Result;
 import org.eclipse.edc.connector.cocos.spi.CocosAgentCompletionRegistry;
+import org.eclipse.edc.connector.cocos.spi.CocosAgentReadyRegistry;
 
 import java.util.Optional;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.TimeUnit;
+
 
 public class ComputationOrchestratorImpl implements ComputationOrchestrator {
 
@@ -57,23 +58,31 @@ public class ComputationOrchestratorImpl implements ComputationOrchestrator {
     private void runJob(ComputationJob job) {
         try {
             // Pre-create the completion future to prevent race conditions where agent completes before future is created
-            for (var unit : job.getUnits()) {
-                CocosAgentCompletionRegistry.getOrCreate(unit.getVmIp());
-            }
+            CocosAgentCompletionRegistry.getOrCreate(job.getJobId());
+            var readyFuture = CocosAgentReadyRegistry.getOrCreate(job.getJobId());
 
             startAgents(job);
+
+            // Wait indefinitely for agent to report ready (via CVMS gRPC server RunResponse)
+            // Agent may come online at any time after job submission
+            try {
+                readyFuture.get();
+            } catch (Exception e) {
+                throw new RuntimeException("Agent failed to report ready on Job " + job.getJobId(), e);
+            } finally {
+                CocosAgentReadyRegistry.remove(job.getJobId());
+            }
+
             uploadAssets(job);
 
-            // Wait for agent to report run complete via CVMS gRPC server event
-            for (var unit : job.getUnits()) {
-                var completionFuture = CocosAgentCompletionRegistry.getOrCreate(unit.getVmIp());
-                try {
-                    completionFuture.get(10, TimeUnit.MINUTES);
-                } catch (Exception e) {
-                    throw new RuntimeException("Computation run failed or timed out on VM " + unit.getVmIp(), e);
-                } finally {
-                    CocosAgentCompletionRegistry.remove(unit.getVmIp());
-                }
+            // Wait indefinitely for agent to report run complete via CVMS gRPC server event
+            var completionFuture = CocosAgentCompletionRegistry.getOrCreate(job.getJobId());
+            try {
+                completionFuture.get();
+            } catch (Exception e) {
+                throw new RuntimeException("Computation run failed or timed out on Job " + job.getJobId(), e);
+            } finally {
+                CocosAgentCompletionRegistry.remove(job.getJobId());
             }
 
             collectResults(job);
