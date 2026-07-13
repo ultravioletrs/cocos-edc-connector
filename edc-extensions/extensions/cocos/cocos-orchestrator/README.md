@@ -33,8 +33,9 @@ This extension can be configured with the following properties:
 
 ---
 
-## ⚠️ Unresolved Implementation Gaps
+## 🛠️ Data Space Asset Fetching
 
-* **`StubRemoteAssetFetcher`**:
-  - Located in this module. Currently return an `UnsupportedOperationException`. 
-  - Resolving assets declared as `AssetSource.Type.REMOTE` requires implementing a Dataspace Protocol (DSP) catalog client. Until built, only `AssetSource.Type.FILE` (inline) is supported.
+* **`DspRemoteAssetFetcher`**:
+  - Implements programmatic DSP asset resolution.
+  - Resolves assets declared as `AssetSource.Type.REMOTE` by fetching provider DCAT catalogs, initiating contract negotiations, and requesting transfers into the `InMemory` data sink.
+  - Wireable dependencies: `CatalogService`, `ContractNegotiationService`, and `TransferProcessService` (injected via `CocosOrchestratorExtension`).

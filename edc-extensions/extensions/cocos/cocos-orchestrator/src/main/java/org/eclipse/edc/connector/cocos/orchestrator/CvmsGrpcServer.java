@@ -57,9 +57,9 @@ public class CvmsGrpcServer {
         }
     }
 
-    private static final Context.Key<String> CLIENT_IP_KEY = Context.key("client-ip");
-    private static final Context.Key<String> JOB_ID_KEY = Context.key("job-id");
-    private static final Context.Key<String> CONNECTION_TYPE_KEY = Context.key("connection-type");
+    static final Context.Key<String> CLIENT_IP_KEY = Context.key("client-ip");
+    static final Context.Key<String> JOB_ID_KEY = Context.key("job-id");
+    static final Context.Key<String> CONNECTION_TYPE_KEY = Context.key("connection-type");
 
     private static class RemoteAddressInterceptor implements ServerInterceptor {
         @Override
@@ -101,7 +101,7 @@ public class CvmsGrpcServer {
         };
     }
 
-    private class CvmsServiceImpl extends ServiceGrpc.ServiceImplBase {
+    class CvmsServiceImpl extends ServiceGrpc.ServiceImplBase {
 
         @Override
         public StreamObserver<ClientStreamMessage> process(StreamObserver<ServerStreamMessage> responseObserver) {

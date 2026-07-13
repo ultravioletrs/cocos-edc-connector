@@ -5,6 +5,9 @@ import org.eclipse.edc.connector.cocos.spi.CocosCliService;
 import org.eclipse.edc.connector.cocos.spi.ComputationJobStore;
 import org.eclipse.edc.connector.cocos.spi.ComputationOrchestrator;
 import org.eclipse.edc.connector.cocos.spi.RemoteAssetFetcher;
+import org.eclipse.edc.connector.controlplane.services.spi.catalog.CatalogService;
+import org.eclipse.edc.connector.controlplane.services.spi.contractnegotiation.ContractNegotiationService;
+import org.eclipse.edc.connector.controlplane.services.spi.transferprocess.TransferProcessService;
 import org.eclipse.edc.http.spi.EdcHttpClient;
 import org.eclipse.edc.runtime.metamodel.annotation.Extension;
 import org.eclipse.edc.runtime.metamodel.annotation.Inject;
@@ -24,6 +27,15 @@ public class CocosOrchestratorExtension implements ServiceExtension {
 
     @Inject
     private EdcHttpClient httpClient;
+
+    @Inject
+    private CatalogService catalogService;
+
+    @Inject
+    private ContractNegotiationService contractNegotiationService;
+
+    @Inject
+    private TransferProcessService transferProcessService;
 
     private InMemoryComputationJobStore jobStore;
     private CvmsGrpcServer cvmsServer;
@@ -67,7 +79,7 @@ public class CocosOrchestratorExtension implements ServiceExtension {
         var monitor = context.getMonitor();
         var callbackClient = new TowerCallbackClient(httpClient, mapper, monitor);
         var executor = Executors.newCachedThreadPool();
-        var remoteAssetFetcher = new StubRemoteAssetFetcher();
+        var remoteAssetFetcher = new DspRemoteAssetFetcher(catalogService, contractNegotiationService, transferProcessService, mapper);
         return new ComputationOrchestratorImpl(cliService, jobStore, remoteAssetFetcher, callbackClient, executor, monitor);
     }
 }

@@ -31,5 +31,8 @@ public class CocosDataSinkExtension implements ServiceExtension {
     public void initialize(ServiceExtensionContext context) {
         var factory = new CocosVmDataSinkFactory(cliService, executorContainer.getExecutorService(), context.getMonitor());
         pipelineService.registerFactory(factory);
+
+        var inMemoryFactory = new InMemoryDataSinkFactory(executorContainer.getExecutorService(), context.getMonitor());
+        pipelineService.registerFactory(inMemoryFactory);
     }
 }
