@@ -21,15 +21,15 @@ Inside the `edc-extensions` directory, the following Gradle tasks coordinate com
 
 Other development partners must implement the following components before the Cocos connector can be fully operational.
 
-### Gap A: DSP Consumer Flow (`StubRemoteAssetFetcher`)
-* **Target File**: [StubRemoteAssetFetcher.java](extensions/cocos/cocos-orchestrator/src/main/java/org/eclipse/edc/connector/cocos/orchestrator/StubRemoteAssetFetcher.java)
-* **Status**: Currently a stub returning `CompletableFuture.failedFuture(new UnsupportedOperationException())`.
+### Gap A: DSP Consumer Flow (Resolved)
+* **Target File**: [DspRemoteAssetFetcher.java](extensions/cocos/cocos-orchestrator/src/main/java/org/eclipse/edc/connector/cocos/orchestrator/DspRemoteAssetFetcher.java)
+* **Status**: **RESOLVED**. Implemented full programmatic DSP consumer sequence.
 * **Objective**: Resolve remote assets specified with `AssetSource.Type.REMOTE` in the computation manifest.
-* **Required Flow to Build**:
-  1. **Fetch Catalog**: Call the provider connector's DSP protocol URL (`providerConnectorUrl`) to retrieve the catalog. Search for the catalog offer matching the target `assetId`.
-  2. **Contract Negotiation**: Initiate contract negotiation (`ContractNegotiation`) using the retrieved contract offer and its policies.
-  3. **Transfer Process**: Once negotiation is complete and a contract agreement is reached, start a `TransferProcess` requesting the transfer of the asset.
-  4. **Data Reception**: Pipe the incoming data plane stream from the provider's data plane, collect the data as bytes, and return them via `CompletableFuture<byte[]>`.
+* **Flow Built**:
+  1. **Fetch Catalog**: Calls `CatalogService.requestCatalog(...)` to retrieve the provider's DCAT catalog as JSON-LD, recursively searches for the dataset matching the requested asset ID, and extracts the policy offer ID.
+  2. **Contract Negotiation**: Initiates `ContractRequest` via `ContractNegotiationService.initiateNegotiation(...)`, polling the status until it is finalized.
+  3. **Transfer Process**: Initiates transfer specifying the `"InMemory"` destination type and a unique buffer ID.
+  4. **Data Reception**: The custom [InMemoryDataSink](extensions/cocos/cocos-data-sink/src/main/java/org/eclipse/edc/connector/cocos/datasink/InMemoryDataSink.java) intercepts the stream, extracts raw bytes, and completes the transaction using the `InMemoryBufferRegistry` buffer.
 
 ---
 
@@ -42,16 +42,14 @@ Other development partners must implement the following components before the Co
 
 ---
 
-### Gap C: Unit Testing Coverage
+### Gap C: Unit & E2E Mock Testing (Resolved)
 * **Target Location**: `src/test/java` directories
-* **Status**: Partially Addressed (JUnit 5 + Mockito + AssertJ test framework configured and integrated).
-* **TCK Runtime Note**: `cocos-attestation-credential-service` requires `decentralized-claims-spi` from the EDC DCP/Identity Hub module. The bare TCK control plane does **not** ship this SPI. When deploying to the TCK connector for E2E testing, exclude this JAR from the runtime lib directory. It should only be deployed against a full DCP-capable connector.
-* **Completed Tests**:
-  - [AttestationBackedPresentationRequestServiceTest](extensions/cocos/cocos-attestation-credential-service/src/test/java/org/eclipse/edc/connector/cocos/attestation/AttestationBackedPresentationRequestServiceTest.java): Verifies the authentication and verification sequences against the Trustee KBS.
-* **Remaining Areas for Test Coverage**:
-  1. **`ComputationOrchestratorImpl`**: Test the orchestration lifecycle state machine (start agents, upload assets, wait for completion, collect results).
-  2. **`CvmsGrpcServer`**: Test the bidirectional gRPC stream handler (receiving enclaves registration, sending manifest, forwarding logs).
-  3. **`CocosCliServiceImpl`**: Mock subprocess execution and verify CLI argument construction for different commands.
+* **Status**: **RESOLVED**. Configured JUnit 5 + Mockito + AssertJ. Built a comprehensive test suite to mock all external UMU and provider components (Identity Hub, Catalog, Negotiation, and Data Transfer).
+* **Completed Test Suite**:
+  - [DspRemoteAssetFetcherTest](extensions/cocos/cocos-orchestrator/src/test/java/org/eclipse/edc/connector/cocos/orchestrator/DspRemoteAssetFetcherTest.java): Mocks the catalog service, contract negotiation states, and transfer process to simulate a complete E2E download using the in-memory sink registry.
+  - [ComputationOrchestratorImplTest](extensions/cocos/cocos-orchestrator/src/test/java/org/eclipse/edc/connector/cocos/orchestrator/ComputationOrchestratorImplTest.java): Simulates the asynchronous agent launch, readiness checks, file uploads, and results retrieval.
+  - [CvmsGrpcServerTest](extensions/cocos/cocos-orchestrator/src/test/java/org/eclipse/edc/connector/cocos/orchestrator/CvmsGrpcServerTest.java): Tests the bidirectional gRPC stream, validating manifest transfers and status event callbacks from simulated agents.
+  - [CocosCliServiceImplTest](extensions/cocos/cocos-cli/src/test/java/org/eclipse/edc/connector/cocos/cli/CocosCliServiceImplTest.java): Simulates agent health socket probes and verifies subprocess execution commands.
 
 ---
 
