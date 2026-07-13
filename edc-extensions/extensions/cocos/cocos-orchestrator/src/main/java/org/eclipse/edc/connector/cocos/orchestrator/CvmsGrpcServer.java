@@ -24,6 +24,7 @@ import java.net.SocketAddress;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.Base64;
+import java.util.concurrent.ExecutionException;
 
 public class CvmsGrpcServer {
 
@@ -57,6 +58,8 @@ public class CvmsGrpcServer {
     }
 
     private static final Context.Key<String> CLIENT_IP_KEY = Context.key("client-ip");
+    private static final Context.Key<String> JOB_ID_KEY = Context.key("job-id");
+    private static final Context.Key<String> CONNECTION_TYPE_KEY = Context.key("connection-type");
 
     private static class RemoteAddressInterceptor implements ServerInterceptor {
         @Override
@@ -69,9 +72,33 @@ public class CvmsGrpcServer {
             if (remoteAddr instanceof InetSocketAddress) {
                 ip = ((InetSocketAddress) remoteAddr).getAddress().getHostAddress();
             }
-            Context context = Context.current().withValue(CLIENT_IP_KEY, ip);
+
+            Metadata.Key<String> jobIdMetaKey = Metadata.Key.of("job-id", Metadata.ASCII_STRING_MARSHALLER);
+            String jobId = headers.get(jobIdMetaKey);
+            if (jobId == null) {
+                jobId = "";
+            }
+
+            Metadata.Key<String> connTypeMetaKey = Metadata.Key.of("connection-type", Metadata.ASCII_STRING_MARSHALLER);
+            String connectionType = headers.get(connTypeMetaKey);
+            if (connectionType == null) {
+                connectionType = "agent";
+            }
+
+            Context context = Context.current()
+                    .withValue(CLIENT_IP_KEY, ip)
+                    .withValue(JOB_ID_KEY, jobId)
+                    .withValue(CONNECTION_TYPE_KEY, connectionType);
             return Contexts.interceptCall(context, call, headers, next);
         }
+    }
+
+    private static StreamObserver<ClientStreamMessage> emptyObserver() {
+        return new StreamObserver<ClientStreamMessage>() {
+            @Override public void onNext(ClientStreamMessage value) {}
+            @Override public void onError(Throwable t) {}
+            @Override public void onCompleted() {}
+        };
     }
 
     private class CvmsServiceImpl extends ServiceGrpc.ServiceImplBase {
@@ -79,50 +106,73 @@ public class CvmsGrpcServer {
         @Override
         public StreamObserver<ClientStreamMessage> process(StreamObserver<ServerStreamMessage> responseObserver) {
             String clientIp = CLIENT_IP_KEY.get();
-            monitor.info("Agent connected to CVMS from IP: " + clientIp + ", waiting for manifest...");
+            String jobId = JOB_ID_KEY.get();
+            String connectionType = CONNECTION_TYPE_KEY.get();
 
-            ComputeManifest manifest = null;
-            String registryKey = null;
-            for (int i = 0; i < 60; i++) {
-                manifest = CocosManifestRegistry.get(clientIp);
-                if (manifest != null) {
-                    registryKey = clientIp;
-                    break;
-                }
-                // Fall back to whatever key the orchestrator registered the manifest under.
-                // This covers the SSH-tunnel case where the orchestrator sees 127.0.0.1 as
-                // the vmIp, but also any other pre-registered key if the agent connects from
-                // a different IP than what was recorded in the manifest payload.
-                String fallbackKey = CocosManifestRegistry.findKeyForAnyManifest();
-                if (fallbackKey != null) {
-                    manifest = CocosManifestRegistry.get(fallbackKey);
-                    if (manifest != null) {
-                        registryKey = fallbackKey;
-                        break;
-                    }
-                }
-                try {
-                    Thread.sleep(500);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    break;
-                }
+            monitor.info("Agent connected to CVMS from IP: " + clientIp
+                    + " with Job ID: " + jobId
+                    + ", connection-type: " + connectionType
+                    + ", waiting for manifest...");
+
+            if (jobId == null || jobId.isEmpty()) {
+                monitor.severe("Rejected connection from " + clientIp + ": missing job-id metadata header");
+                responseObserver.onError(new RuntimeException("Missing required job-id metadata header"));
+                return emptyObserver();
             }
 
-            if (manifest == null) {
-                monitor.severe("No computation manifest registered for agent IP: " + clientIp);
-                responseObserver.onError(new RuntimeException("No manifest registered for IP " + clientIp));
+            // Block indefinitely until the orchestrator registers a manifest for this jobId.
+            // Woken up when startAgent() calls CocosManifestRegistry.register(jobId, manifest).
+            ComputeManifest manifest;
+            try {
+                manifest = CocosManifestRegistry.waitForManifest(jobId).get();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                responseObserver.onError(e);
+                return emptyObserver();
+            } catch (ExecutionException e) {
+                responseObserver.onError(e.getCause());
+                return emptyObserver();
+            } finally {
+                CocosManifestRegistry.removeWaiter(jobId);
+            }
+
+            monitor.info("Manifest received for Job ID: " + jobId + ", connection-type: " + connectionType);
+
+            // Log-forwarder connections: forward AgentLog and AgentEvent messages, no RunReq.
+            if ("log-forwarder".equals(connectionType)) {
                 return new StreamObserver<ClientStreamMessage>() {
-                    @Override public void onNext(ClientStreamMessage value) {}
-                    @Override public void onError(Throwable t) {}
-                    @Override public void onCompleted() {}
+                    @Override
+                    public void onNext(ClientStreamMessage value) {
+                        if (value.hasAgentLog()) {
+                            AgentLog log = value.getAgentLog();
+                            monitor.info(String.format("[AgentLog] [%s] %s", log.getLevel(), log.getMessage()));
+                        } else if (value.hasAgentEvent()) {
+                            AgentEvent event = value.getAgentEvent();
+                            monitor.info(String.format("[AgentEvent] [%s] %s", event.getEventType(), event.getStatus()));
+                            String status = event.getStatus();
+                            if ("Ready".equalsIgnoreCase(status) || "Completed".equalsIgnoreCase(status)) {
+                                org.eclipse.edc.connector.cocos.spi.CocosAgentCompletionRegistry.complete(jobId);
+                            } else if ("Failed".equalsIgnoreCase(status)) {
+                                org.eclipse.edc.connector.cocos.spi.CocosAgentCompletionRegistry.fail(jobId, "Agent computation execution failed");
+                            }
+                        }
+                    }
+                    @Override
+                    public void onError(Throwable t) {
+                        monitor.warning("Log-forwarder stream error from " + clientIp + ": " + t.getMessage());
+                    }
+                    @Override
+                    public void onCompleted() {
+                        monitor.info("Log-forwarder stream completed from " + clientIp);
+                        responseObserver.onCompleted();
+                    }
                 };
             }
 
+            // Agent connection: send the RunReq.
             try {
                 byte[] publicKeyDer = readPublicKeyDer(publicKeyPath);
                 ComputationRunReq runReq = buildComputationRunReq(manifest, publicKeyDer);
-
                 monitor.info("Sending computation run request to agent " + clientIp);
                 responseObserver.onNext(ServerStreamMessage.newBuilder()
                         .setRunReq(runReq)
@@ -132,8 +182,7 @@ public class CvmsGrpcServer {
                 responseObserver.onError(e);
             }
 
-            // Snapshot into final locals so the anonymous StreamObserver can capture them.
-            final String resolvedKey = registryKey != null ? registryKey : clientIp;
+            final String resolvedKey = jobId;
 
             return new StreamObserver<ClientStreamMessage>() {
 
@@ -145,18 +194,23 @@ public class CvmsGrpcServer {
                     } else if (value.hasAgentEvent()) {
                         AgentEvent event = value.getAgentEvent();
                         monitor.info(String.format("[AgentEvent] [%s] %s", event.getEventType(), event.getStatus()));
+                        String status = event.getStatus();
+                        if ("Ready".equalsIgnoreCase(status) || "Completed".equalsIgnoreCase(status)) {
+                            org.eclipse.edc.connector.cocos.spi.CocosAgentCompletionRegistry.complete(resolvedKey);
+                        } else if ("Failed".equalsIgnoreCase(status)) {
+                            org.eclipse.edc.connector.cocos.spi.CocosAgentCompletionRegistry.fail(resolvedKey, "Agent computation execution failed");
+                        }
                     } else if (value.hasRunRes()) {
                         RunResponse res = value.getRunRes();
                         if (res.getError() != null && !res.getError().isEmpty()) {
                             monitor.severe("Agent reported execution error: " + res.getError());
-                            // Signal under the same key the orchestrator is waiting on.
                             org.eclipse.edc.connector.cocos.spi.CocosAgentCompletionRegistry.fail(
+                                    resolvedKey, res.getError());
+                            org.eclipse.edc.connector.cocos.spi.CocosAgentReadyRegistry.fail(
                                     resolvedKey, res.getError());
                         } else {
                             monitor.info("Agent reported run complete successfully");
-                            // Signal under the same key the orchestrator is waiting on.
-                            org.eclipse.edc.connector.cocos.spi.CocosAgentCompletionRegistry.complete(
-                                    resolvedKey);
+                            org.eclipse.edc.connector.cocos.spi.CocosAgentReadyRegistry.complete(resolvedKey);
                         }
                     }
                 }

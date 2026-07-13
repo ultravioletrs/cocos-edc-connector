@@ -30,8 +30,8 @@ public class CocosCliServiceImpl implements CocosCliService {
 
     @Override
     public Result<Void> startAgent(String vmIp, ComputeManifest manifest) {
-        CocosManifestRegistry.register(vmIp, manifest);
-        monitor.info("Registered manifest in CVMS registry for VM IP: " + vmIp);
+        CocosManifestRegistry.register(manifest.getId(), manifest);
+        monitor.info("Registered manifest in CVMS registry for Job ID: " + manifest.getId());
         return Result.success();
     }
 
@@ -127,6 +127,15 @@ public class CocosCliServiceImpl implements CocosCliService {
         for (int i = 0; i < maxRetries; i++) {
             try (java.net.Socket socket = new java.net.Socket()) {
                 socket.connect(new java.net.InetSocketAddress(vmIp, 7001), 1000);
+                socket.setSoTimeout(500);
+                int bytesRead = socket.getInputStream().read();
+                if (bytesRead == -1) {
+                    throw new java.io.IOException("Connection closed immediately by peer");
+                }
+                monitor.info("Cocos Agent is ready and listening on port 7001");
+                return;
+            } catch (java.net.SocketTimeoutException ste) {
+                // Connection remains open (no data sent by gRPC server), indicating a live backend
                 monitor.info("Cocos Agent is ready and listening on port 7001");
                 return;
             } catch (Exception e) {

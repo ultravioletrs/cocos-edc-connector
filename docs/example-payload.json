@@ -1,0 +1,35 @@
+{
+  "jobId": "test-job-e2e",
+  "towerCallbackUrl": "http://localhost:8090/callback",
+  "units": [
+    {
+      "vmIp": "127.0.0.1",
+      "manifest": {
+        "id": "test-job-e2e",
+        "name": "lin-reg-test",
+        "description": "Iris linear regression",
+        "algorithm": {
+          "type": "python",
+          "filename": "lin_reg.py",
+          "hash": "a103212ef8c4af11f441d89b6a2974b5b9b5ef3abe14dd6c36544651737b4baa",
+          "source": {
+            "type": "FILE",
+            "content": "aW1wb3J0IHBhbmRhcyBhcyBwZApwcmludCgiUGxhaW50ZXh0IExpbmVhciBSZWdyZXNzaW9uIEludGVncmF0aW9uIFRlc3QgUnVuIFN1Y2Nlc3NmdWwhIikK",
+            "encrypted": false
+          }
+        },
+        "datasets": [
+          {
+            "filename": "iris.csv",
+            "hash": "d0a6291e7dbdfa7dc598ccf5cf87fd841b757bc4014b7ccc458fb16419ec613b",
+            "source": {
+              "type": "FILE",
+              "content": "c2VwYWxfbGVuZ3RoLHNlcGFsX3dpZHRoLHBldGFsX2xlbmd0aCxwZXRhbF93aWR0aCxzcGVjaWVzCjUuMSwzLjUsMS40LDAuMixzZXRvc2EK",
+              "encrypted": false
+            }
+          }
+        ]
+      }
+    }
+  ]
+}
