@@ -29,14 +29,14 @@ public class CocosCliServiceImpl implements CocosCliService {
     }
 
     @Override
-    public Result<Void> startAgent(String vmIp, ComputeManifest manifest) {
+    public Result<Void> startAgent(String agentAddress, ComputeManifest manifest) {
         CocosManifestRegistry.register(manifest.getId(), manifest);
         monitor.info("Registered manifest in CVMS registry for Job ID: " + manifest.getId());
         return Result.success();
     }
 
     @Override
-    public Result<Void> uploadDataset(String vmIp, String filename, byte[] data) {
+    public Result<Void> uploadDataset(String agentAddress, String filename, byte[] data) {
         Path tempDir = null;
         try {
             tempDir = Files.createTempDirectory("cocos-dataset-");
@@ -44,7 +44,7 @@ public class CocosCliServiceImpl implements CocosCliService {
             Files.write(tempFile, data);
 
             String[] args = new String[]{"data", tempFile.toAbsolutePath().toString(), privateKeyPath};
-            Result<byte[]> result = runCliCommand(vmIp, args, tempDir.toAbsolutePath().toString(), false, null);
+            Result<byte[]> result = runCliCommand(agentAddress, args, tempDir.toAbsolutePath().toString(), false, null);
             if (result.failed()) {
                 return Result.failure(result.getFailureDetail());
             }
@@ -57,32 +57,15 @@ public class CocosCliServiceImpl implements CocosCliService {
     }
 
     @Override
-    public Result<Void> uploadAlgorithm(String vmIp, String filename, byte[] data) {
+    public Result<Void> uploadAlgorithm(String agentAddress, String filename, byte[] data) {
         Path tempDir = null;
         try {
             tempDir = Files.createTempDirectory("cocos-algo-");
             Path tempFile = tempDir.resolve(filename);
             Files.write(tempFile, data);
 
-            List<String> argsList = new ArrayList<>();
-            argsList.add("algo");
-            argsList.add(tempFile.toAbsolutePath().toString());
-            argsList.add(privateKeyPath);
-            if (filename.endsWith(".py")) {
-                argsList.add("-a");
-                argsList.add("python");
-            } else if (filename.endsWith(".wasm")) {
-                argsList.add("-a");
-                argsList.add("wasm");
-            } else if (filename.endsWith(".tar")) {
-                argsList.add("-a");
-                argsList.add("docker");
-            } else {
-                argsList.add("-a");
-                argsList.add("binary");
-            }
-
-            Result<byte[]> result = runCliCommand(vmIp, argsList.toArray(new String[0]), tempDir.toAbsolutePath().toString(), false, null);
+            String[] args = new String[]{"algo", tempFile.toAbsolutePath().toString(), privateKeyPath, "-a", "docker"};
+            Result<byte[]> result = runCliCommand(agentAddress, args, tempDir.toAbsolutePath().toString(), false, null);
             if (result.failed()) {
                 return Result.failure(result.getFailureDetail());
             }
@@ -95,26 +78,22 @@ public class CocosCliServiceImpl implements CocosCliService {
     }
 
     @Override
-    public Result<byte[]> requestAttestation(String vmIp, String nonce) {
-        Path tempDir = null;
-        try {
-            tempDir = Files.createTempDirectory("cocos-attestation-");
-            String[] args = new String[]{"attestation", "get", "snp", "--tee", nonce};
-            return runCliCommand(vmIp, args, tempDir.toAbsolutePath().toString(), true, "attestation.bin");
-        } catch (Exception e) {
-            return Result.failure("Failed to request attestation: " + e.getMessage());
-        } finally {
-            cleanupTempDir(tempDir);
-        }
+    public Result<byte[]> requestAttestation(String agentAddress, String nonce) {
+        String[] args = new String[]{"attestation", privateKeyPath, "--nonce", nonce};
+        return runCliCommand(agentAddress, args, null, false, null);
     }
 
     @Override
-    public Result<byte[]> fetchResult(String vmIp) {
+    public Result<byte[]> fetchResult(String agentAddress) {
         Path tempDir = null;
         try {
             tempDir = Files.createTempDirectory("cocos-result-");
             String[] args = new String[]{"result", privateKeyPath};
-            return runCliCommand(vmIp, args, tempDir.toAbsolutePath().toString(), true, "results.zip");
+            Result<byte[]> result = runCliCommand(agentAddress, args, tempDir.toAbsolutePath().toString(), true, "results.zip");
+            if (result.failed()) {
+                return Result.failure(result.getFailureDetail());
+            }
+            return Result.success(result.getContent());
         } catch (Exception e) {
             return Result.failure("Failed to fetch result: " + e.getMessage());
         } finally {
@@ -122,21 +101,42 @@ public class CocosCliServiceImpl implements CocosCliService {
         }
     }
 
-    private void waitForAgent(String vmIp) {
+    private String[] parseHostAndPort(String agentAddress) {
+        if (agentAddress == null || agentAddress.isEmpty()) {
+            String defaultPortStr = System.getProperty("cocos.agent.port", "49209");
+            return new String[]{"127.0.0.1", defaultPortStr};
+        }
+        if (agentAddress.contains(":")) {
+            return agentAddress.split(":", 2);
+        }
+        String defaultPortStr = System.getProperty("cocos.agent.port", "49209");
+        return new String[]{agentAddress, defaultPortStr};
+    }
+
+    private void waitForAgent(String agentAddress) {
+        String[] hostPort = parseHostAndPort(agentAddress);
+        String host = hostPort[0];
+        int port;
+        try {
+            port = Integer.parseInt(hostPort[1]);
+        } catch (Exception e) {
+            port = 49209;
+        }
+
         int maxRetries = 30; // 30 seconds
         for (int i = 0; i < maxRetries; i++) {
             try (java.net.Socket socket = new java.net.Socket()) {
-                socket.connect(new java.net.InetSocketAddress(vmIp, 7001), 1000);
+                socket.connect(new java.net.InetSocketAddress(host, port), 1000);
                 socket.setSoTimeout(500);
                 int bytesRead = socket.getInputStream().read();
                 if (bytesRead == -1) {
                     throw new java.io.IOException("Connection closed immediately by peer");
                 }
-                monitor.info("Cocos Agent is ready and listening on port 7001");
+                monitor.info("Cocos Agent is ready and listening on " + host + ":" + port);
                 return;
             } catch (java.net.SocketTimeoutException ste) {
                 // Connection remains open (no data sent by gRPC server), indicating a live backend
-                monitor.info("Cocos Agent is ready and listening on port 7001");
+                monitor.info("Cocos Agent is ready and listening on " + host + ":" + port);
                 return;
             } catch (Exception e) {
                 try {
@@ -147,11 +147,11 @@ public class CocosCliServiceImpl implements CocosCliService {
                 }
             }
         }
-        monitor.warning("Cocos Agent did not start listening on port 7001 within 30 seconds");
+        monitor.warning("Cocos Agent did not start listening on " + host + ":" + port + " within 30 seconds");
     }
 
-    private Result<byte[]> runCliCommand(String vmIp, String[] args, String workingDir, boolean readOutput, String outputFile) {
-        waitForAgent(vmIp);
+    private Result<byte[]> runCliCommand(String agentAddress, String[] args, String workingDir, boolean readOutput, String outputFile) {
+        waitForAgent(agentAddress);
         try {
             List<String> command = new ArrayList<>();
             command.add(cliBinaryPath);
@@ -162,12 +162,27 @@ public class CocosCliServiceImpl implements CocosCliService {
                 pb.directory(new File(workingDir));
             }
             Map<String, String> env = pb.environment();
-            env.put("AGENT_GRPC_URL", vmIp + ":7001");
+            String[] hostPort = parseHostAndPort(agentAddress);
+            String fullTargetUrl = hostPort[0] + ":" + hostPort[1];
+            env.put("AGENT_GRPC_URL", fullTargetUrl);
             env.put("AGENT_GRPC_ATTESTED_TLS", "false");
 
             Process process = pb.start();
 
+            StringBuilder stdout = new StringBuilder();
             StringBuilder stderr = new StringBuilder();
+
+            // Read standard output on a separate thread to prevent blocking
+            Thread stdoutThread = new Thread(() -> {
+                try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        stdout.append(line).append("\n");
+                    }
+                } catch (Exception ignored) {}
+            });
+            stdoutThread.start();
+
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getErrorStream()))) {
                 String line;
                 while ((line = reader.readLine()) != null) {
@@ -175,10 +190,29 @@ public class CocosCliServiceImpl implements CocosCliService {
                 }
             }
 
+            try {
+                stdoutThread.join();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                monitor.warning("Interrupted while waiting for Cocos CLI stdout reader thread");
+            }
+
             int exitCode = process.waitFor();
-            if (exitCode != 0) {
-                monitor.severe("Cocos CLI command failed: " + String.join(" ", command) + ". Stderr: " + stderr);
-                return Result.failure("Cocos CLI command failed with exit code " + exitCode + ": " + stderr.toString().trim());
+            String combinedOutput = stdout.toString().trim();
+            if (combinedOutput.length() > 0) {
+                monitor.info("Cocos CLI output:\n" + combinedOutput);
+            }
+
+            boolean hasFailureIcon = combinedOutput.contains("❌");
+            boolean hasFailedMessage = combinedOutput.toLowerCase().contains("failed to");
+
+            if (exitCode != 0 || hasFailureIcon || hasFailedMessage) {
+                String errorMsg = stderr.toString().trim();
+                if (errorMsg.isEmpty()) {
+                    errorMsg = combinedOutput;
+                }
+                monitor.severe("Cocos CLI command failed: " + String.join(" ", command) + ". Error: " + errorMsg);
+                return Result.failure("Cocos CLI command failed: " + errorMsg);
             }
 
             if (readOutput && outputFile != null) {

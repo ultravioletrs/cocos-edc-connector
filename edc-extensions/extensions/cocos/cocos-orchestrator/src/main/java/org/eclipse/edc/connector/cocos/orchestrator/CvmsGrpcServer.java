@@ -114,8 +114,16 @@ public class CvmsGrpcServer {
                     + ", connection-type: " + connectionType
                     + ", waiting for manifest...");
 
+            if (jobId == null || jobId.isEmpty() || (CocosManifestRegistry.get(jobId) == null && CocosManifestRegistry.getFirstRegisteredJobId() != null)) {
+                String activeJob = CocosManifestRegistry.getFirstRegisteredJobId();
+                if (activeJob != null) {
+                    jobId = activeJob;
+                    monitor.info("Using active registered job ID: " + jobId + " for connection-type: " + connectionType);
+                }
+            }
+
             if (jobId == null || jobId.isEmpty()) {
-                monitor.severe("Rejected connection from " + clientIp + ": missing job-id metadata header");
+                monitor.severe("Rejected connection from " + clientIp + ": missing job-id metadata header and no active job registered");
                 responseObserver.onError(new RuntimeException("Missing required job-id metadata header"));
                 return emptyObserver();
             }
@@ -138,6 +146,8 @@ public class CvmsGrpcServer {
 
             monitor.info("Manifest received for Job ID: " + jobId + ", connection-type: " + connectionType);
 
+            final String effectiveJobId = jobId;
+
             // Log-forwarder connections: forward AgentLog and AgentEvent messages, no RunReq.
             if ("log-forwarder".equals(connectionType)) {
                 return new StreamObserver<ClientStreamMessage>() {
@@ -150,10 +160,14 @@ public class CvmsGrpcServer {
                             AgentEvent event = value.getAgentEvent();
                             monitor.info(String.format("[AgentEvent] [%s] %s", event.getEventType(), event.getStatus()));
                             String status = event.getStatus();
-                            if ("Ready".equalsIgnoreCase(status) || "Completed".equalsIgnoreCase(status)) {
-                                org.eclipse.edc.connector.cocos.spi.CocosAgentCompletionRegistry.complete(jobId);
+                            String eventType = event.getEventType();
+                            if ("InProgress".equalsIgnoreCase(status) || "ReceivingAlgorithm".equalsIgnoreCase(eventType) || "Ready".equalsIgnoreCase(status)) {
+                                org.eclipse.edc.connector.cocos.spi.CocosAgentReadyRegistry.complete(effectiveJobId);
+                            }
+                            if ("Ready".equalsIgnoreCase(status) || "Completed".equalsIgnoreCase(status) || "ResultsConsumed".equalsIgnoreCase(eventType)) {
+                                org.eclipse.edc.connector.cocos.spi.CocosAgentCompletionRegistry.complete(effectiveJobId);
                             } else if ("Failed".equalsIgnoreCase(status)) {
-                                org.eclipse.edc.connector.cocos.spi.CocosAgentCompletionRegistry.fail(jobId, "Agent computation execution failed");
+                                org.eclipse.edc.connector.cocos.spi.CocosAgentCompletionRegistry.fail(effectiveJobId, "Agent computation execution failed");
                             }
                         }
                     }
@@ -195,7 +209,13 @@ public class CvmsGrpcServer {
                         AgentEvent event = value.getAgentEvent();
                         monitor.info(String.format("[AgentEvent] [%s] %s", event.getEventType(), event.getStatus()));
                         String status = event.getStatus();
-                        if ("Ready".equalsIgnoreCase(status) || "Completed".equalsIgnoreCase(status)) {
+                        String eventType = event.getEventType();
+
+                        if ("InProgress".equalsIgnoreCase(status) || "ReceivingAlgorithm".equalsIgnoreCase(eventType)) {
+                            org.eclipse.edc.connector.cocos.spi.CocosAgentReadyRegistry.complete(resolvedKey);
+                        }
+
+                        if ("Ready".equalsIgnoreCase(status) || "Completed".equalsIgnoreCase(status) || "ResultsConsumed".equalsIgnoreCase(eventType)) {
                             org.eclipse.edc.connector.cocos.spi.CocosAgentCompletionRegistry.complete(resolvedKey);
                         } else if ("Failed".equalsIgnoreCase(status)) {
                             org.eclipse.edc.connector.cocos.spi.CocosAgentCompletionRegistry.fail(resolvedKey, "Agent computation execution failed");

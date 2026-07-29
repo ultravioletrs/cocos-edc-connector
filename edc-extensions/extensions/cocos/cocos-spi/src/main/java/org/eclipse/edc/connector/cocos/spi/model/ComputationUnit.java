@@ -5,15 +5,24 @@ import com.fasterxml.jackson.annotation.JsonAutoDetect;
 @JsonAutoDetect(fieldVisibility = JsonAutoDetect.Visibility.ANY)
 public class ComputationUnit {
 
+    private String agentAddress;
     private String vmIp;
     private ComputeManifest manifest;
 
     public ComputationUnit() {}
 
+    public void setAgentAddress(String agentAddress) { this.agentAddress = agentAddress; }
     public void setVmIp(String vmIp) { this.vmIp = vmIp; }
     public void setManifest(ComputeManifest manifest) { this.manifest = manifest; }
 
-    public String getVmIp() { return vmIp; }
+    public String getAgentAddress() {
+        if (agentAddress != null && !agentAddress.isEmpty()) {
+            return agentAddress;
+        }
+        return vmIp;
+    }
+
+    public String getVmIp() { return getAgentAddress(); }
 
     public ComputeManifest getManifest() { return manifest; }
 
@@ -21,6 +30,8 @@ public class ComputationUnit {
 
     public static class Builder {
         private final ComputationUnit instance = new ComputationUnit();
+
+        public Builder agentAddress(String agentAddress) { instance.agentAddress = agentAddress; return this; }
 
         public Builder vmIp(String vmIp) { instance.vmIp = vmIp; return this; }
 
