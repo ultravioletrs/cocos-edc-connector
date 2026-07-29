@@ -64,3 +64,37 @@ If the algorithm or dataset sources are encrypted, Cocos Agent performs hardware
 1. **Public Keys**: The user's public key (e.g., `public.pem`) is embedded inside the run request.
 2. **Attestation Policy**: The KBS verifies the CVM measurement (TDX/SEV-SNP) against a predefined Open Policy Agent (OPA) policy (`policy.rego`).
 3. **Decryption**: Once attested, the agent is securely provisioned the decryption keys to access and execute the assets.
+
+---
+
+## 🌐 Multi-CVM Concurrency & Local Asset Resolution
+
+### 1. Multi-CVM Concurrency Setup
+The EDC Connector supports multiple concurrent CVMs connecting simultaneously. To correlate gRPC streams (manifest delivery, log forwarding) to the correct EDC `jobId`:
+* The guest CVM must set the `AGENT_CVM_ID` environment variable matching the EDC `jobId` (e.g., `zen-fl-toolbox-job-edc-final-e2e`).
+* This is typically written inside the CVM guest's `/etc/cocos/environment` or shared via the 9p mount:
+  ```bash
+  cat > /home/sammy/zentrix/env/environment <<EOF
+  AGENT_LOG_LEVEL="debug"
+  AGENT_CVM_ID="zen-fl-toolbox-job-edc-final-e2e"
+  AGENT_CVM_GRPC_URL="10.0.2.2:49203"
+  EOF
+  ```
+* When the guest's `log-forwarder` and `cocos-agent` connect, they append this ID to their gRPC metadata headers. The EDC connector uses this header to match streams to the correct active job.
+
+### 2. Local Asset Path Resolution (Avoid Large Base64 Embeds)
+For large algorithm binaries (e.g. Docker images like `cocos-protected.tar` which are ~722MB), embedding base64 content inside the JSON payload is inefficient. 
+Instead, specify the local absolute path of the file on the host using the `url` field, and leave the `content` field empty or null:
+
+```json
+"algorithm": {
+    "type": "docker",
+    "filename": "zen-toolbox-cocos-protected.tar",
+    "hash": "<sha256-hash>",
+    "source": {
+        "type": "FILE",
+        "url": "/home/cocos/zentrix/cocos-protected.tar"
+    }
+}
+```
+The EDC connector will automatically detect that the embedded `content` is empty, read the binary file directly from the host local path specified in `url`, and securely upload it to the CVM agent via the CLI.

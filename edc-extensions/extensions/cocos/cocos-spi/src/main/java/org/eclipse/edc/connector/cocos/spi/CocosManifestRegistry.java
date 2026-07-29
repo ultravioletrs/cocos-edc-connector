@@ -10,10 +10,13 @@ public class CocosManifestRegistry {
     private static final Map<String, ComputeManifest> manifests = new ConcurrentHashMap<>();
     private static final Map<String, CompletableFuture<ComputeManifest>> waiters = new ConcurrentHashMap<>();
 
+    private static volatile String latestJobId;
+
     private CocosManifestRegistry() {}
 
     public static void register(String jobId, ComputeManifest manifest) {
         manifests.put(jobId, manifest);
+        latestJobId = jobId;
         // Complete any futures that are blocking on waitForManifest(jobId)
         waiters.computeIfAbsent(jobId, k -> new CompletableFuture<>()).complete(manifest);
     }
@@ -42,5 +45,18 @@ public class CocosManifestRegistry {
 
     public static void removeWaiter(String jobId) {
         waiters.remove(jobId);
+    }
+
+    public static String getFirstRegisteredJobId() {
+        if (latestJobId != null) {
+            return latestJobId;
+        }
+        if (!manifests.isEmpty()) {
+            return manifests.keySet().iterator().next();
+        }
+        if (!waiters.isEmpty()) {
+            return waiters.keySet().iterator().next();
+        }
+        return null;
     }
 }

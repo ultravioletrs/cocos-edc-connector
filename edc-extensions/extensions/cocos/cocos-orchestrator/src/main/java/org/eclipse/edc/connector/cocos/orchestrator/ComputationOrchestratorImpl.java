@@ -99,11 +99,11 @@ public class ComputationOrchestratorImpl implements ComputationOrchestrator {
     private void startAgents(ComputationJob job) {
         job.setStatus(ComputationJob.Status.STARTING_AGENTS);
         for (var unit : job.getUnits()) {
-            var result = cliService.startAgent(unit.getVmIp(), unit.getManifest());
+            var result = cliService.startAgent(unit.getAgentAddress(), unit.getManifest());
             if (result.failed()) {
-                throw new RuntimeException("Failed to start agent on " + unit.getVmIp() + ": " + result.getFailureDetail());
+                throw new RuntimeException("Failed to start agent on " + unit.getAgentAddress() + ": " + result.getFailureDetail());
             }
-            monitor.debug("CocosAI agent started on " + unit.getVmIp());
+            monitor.debug("CocosAI agent started on " + unit.getAgentAddress());
         }
     }
 
@@ -119,38 +119,51 @@ public class ComputationOrchestratorImpl implements ComputationOrchestrator {
 
         var algo = manifest.getAlgorithm();
         if (algo != null) {
-            byte[] data = resolveAsset(unit.getVmIp(), jobId, algo.getSource(), algo.getProviderConnectorUrl());
-            var result = cliService.uploadAlgorithm(unit.getVmIp(), algo.getFilename(), data);
+            byte[] data = resolveAsset(unit.getAgentAddress(), jobId, algo.getSource(), algo.getProviderConnectorUrl());
+            var result = cliService.uploadAlgorithm(unit.getAgentAddress(), algo.getFilename(), data);
             if (result.failed()) {
                 throw new RuntimeException("Failed to upload algorithm " + algo.getFilename()
-                        + " to " + unit.getVmIp() + ": " + result.getFailureDetail());
+                        + " to " + unit.getAgentAddress() + ": " + result.getFailureDetail());
             }
         }
 
         for (var dataset : manifest.getDatasets()) {
-            byte[] data = resolveAsset(unit.getVmIp(), jobId, dataset.getSource(), dataset.getProviderConnectorUrl());
-            var result = cliService.uploadDataset(unit.getVmIp(), dataset.getFilename(), data);
+            byte[] data = resolveAsset(unit.getAgentAddress(), jobId, dataset.getSource(), dataset.getProviderConnectorUrl());
+            var result = cliService.uploadDataset(unit.getAgentAddress(), dataset.getFilename(), data);
             if (result.failed()) {
                 throw new RuntimeException("Failed to upload dataset " + dataset.getFilename()
-                        + " to " + unit.getVmIp() + ": " + result.getFailureDetail());
+                        + " to " + unit.getAgentAddress() + ": " + result.getFailureDetail());
             }
         }
     }
 
 
 
-    private byte[] resolveAsset(String vmIp, String jobId, AssetSource source, String providerConnectorUrl) {
+    private byte[] resolveAsset(String agentAddress, String jobId, AssetSource source, String providerConnectorUrl) {
         if (source.getType() == AssetSource.Type.FILE) {
-            if (source.getContent() == null) {
-                return new byte[0];
+            if (source.getContent() != null && !source.getContent().isEmpty()) {
+                return java.util.Base64.getDecoder().decode(source.getContent().trim());
             }
-            return java.util.Base64.getDecoder().decode(source.getContent().trim());
+            if (source.getUrl() != null && !source.getUrl().isEmpty()) {
+                try {
+                    java.nio.file.Path localPath = java.nio.file.Path.of(source.getUrl());
+                    if (java.nio.file.Files.exists(localPath)) {
+                        monitor.info("Reading local asset file from path: " + source.getUrl());
+                        return java.nio.file.Files.readAllBytes(localPath);
+                    } else {
+                        monitor.warning("Local asset file not found at path: " + source.getUrl());
+                    }
+                } catch (Exception e) {
+                    monitor.warning("Failed to read local file from url: " + source.getUrl(), e);
+                }
+            }
+            return new byte[0];
         }
         // Propagate VM IP and job ID into the thread-local context so that both
         // AttestationBackedPresentationRequestService (consumer mode) and
         // ProviderAttestationPresentationService (provider mode) can resolve them
         // when generating attestation-backed VPs during the DSP credential exchange.
-        CocosContextHolder.setActiveVmIp(vmIp);
+        CocosContextHolder.setActiveVmIp(agentAddress);
         if (jobId != null) {
             CocosContextHolder.setActiveJobId(jobId);
         }
@@ -169,12 +182,12 @@ public class ComputationOrchestratorImpl implements ComputationOrchestrator {
     private void collectResults(ComputationJob job) {
         job.setStatus(ComputationJob.Status.COLLECTING_RESULTS);
         for (var unit : job.getUnits()) {
-            var result = cliService.fetchResult(unit.getVmIp());
+            var result = cliService.fetchResult(unit.getAgentAddress());
             if (result.failed()) {
-                throw new RuntimeException("Failed to fetch result from " + unit.getVmIp() + ": " + result.getFailureDetail());
+                throw new RuntimeException("Failed to fetch result from " + unit.getAgentAddress() + ": " + result.getFailureDetail());
             }
-            job.setResult(unit.getVmIp(), result.getContent());
-            monitor.debug("Result collected from " + unit.getVmIp());
+            job.setResult(unit.getAgentAddress(), result.getContent());
+            monitor.debug("Result collected from " + unit.getAgentAddress());
         }
     }
 }
