@@ -190,4 +190,67 @@ public class ComputationOrchestratorImpl implements ComputationOrchestrator {
             monitor.debug("Result collected from " + unit.getAgentAddress());
         }
     }
+
+    @Override
+    public org.eclipse.edc.spi.result.Result<Void> stopJob(String jobId) {
+        Object rawObserver = org.eclipse.edc.connector.cocos.spi.CocosAgentConnectionRegistry.get(jobId);
+        if (rawObserver == null) {
+            return org.eclipse.edc.spi.result.Result.failure("No active agent connection found for Job ID: " + jobId);
+        }
+        @SuppressWarnings("unchecked")
+        io.grpc.stub.StreamObserver<org.eclipse.edc.connector.cocos.orchestrator.cvms.ServerStreamMessage> observer = 
+                (io.grpc.stub.StreamObserver<org.eclipse.edc.connector.cocos.orchestrator.cvms.ServerStreamMessage>) rawObserver;
+
+        try {
+            var future = org.eclipse.edc.connector.cocos.spi.CocosAgentStopRegistry.getOrCreate(jobId);
+            observer.onNext(org.eclipse.edc.connector.cocos.orchestrator.cvms.ServerStreamMessage.newBuilder()
+                    .setStopComputation(org.eclipse.edc.connector.cocos.orchestrator.cvms.StopComputation.newBuilder()
+                            .setComputationId(jobId)
+                            .build())
+                    .build());
+            
+            future.get(5, java.util.concurrent.TimeUnit.SECONDS);
+            
+            var jobOpt = jobStore.findById(jobId);
+            if (jobOpt.isPresent()) {
+                var job = jobOpt.get();
+                job.setStatus(ComputationJob.Status.FAILED);
+                job.setErrorMessage("Terminated by user request");
+            }
+
+            return org.eclipse.edc.spi.result.Result.success();
+        } catch (Exception e) {
+            return org.eclipse.edc.spi.result.Result.failure("Failed to stop computation: " + e.getMessage());
+        } finally {
+            org.eclipse.edc.connector.cocos.spi.CocosAgentStopRegistry.remove(jobId);
+        }
+    }
+
+    @Override
+    public java.util.concurrent.CompletableFuture<String> queryAgentState(String jobId) {
+        Object rawObserver = org.eclipse.edc.connector.cocos.spi.CocosAgentConnectionRegistry.get(jobId);
+        if (rawObserver == null) {
+            return java.util.concurrent.CompletableFuture.failedFuture(new RuntimeException("No active agent connection found for Job ID: " + jobId));
+        }
+        @SuppressWarnings("unchecked")
+        io.grpc.stub.StreamObserver<org.eclipse.edc.connector.cocos.orchestrator.cvms.ServerStreamMessage> observer = 
+                (io.grpc.stub.StreamObserver<org.eclipse.edc.connector.cocos.orchestrator.cvms.ServerStreamMessage>) rawObserver;
+
+        var future = org.eclipse.edc.connector.cocos.spi.CocosAgentStateRegistry.getOrCreate(jobId);
+        try {
+            observer.onNext(org.eclipse.edc.connector.cocos.orchestrator.cvms.ServerStreamMessage.newBuilder()
+                    .setAgentStateReq(org.eclipse.edc.connector.cocos.orchestrator.cvms.AgentStateReq.newBuilder()
+                            .setId(jobId)
+                            .build())
+                    .build());
+        } catch (Exception e) {
+            org.eclipse.edc.connector.cocos.spi.CocosAgentStateRegistry.remove(jobId);
+            return java.util.concurrent.CompletableFuture.failedFuture(e);
+        }
+        
+        future.orTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
+              .whenComplete((res, ex) -> org.eclipse.edc.connector.cocos.spi.CocosAgentStateRegistry.remove(jobId));
+
+        return future;
+    }
 }

@@ -10,4 +10,8 @@ public interface ComputationOrchestrator {
     String start(ComputationRequest request);
 
     Optional<ComputationJob> getJob(String jobId);
+
+    org.eclipse.edc.spi.result.Result<Void> stopJob(String jobId);
+
+    java.util.concurrent.CompletableFuture<String> queryAgentState(String jobId);
 }

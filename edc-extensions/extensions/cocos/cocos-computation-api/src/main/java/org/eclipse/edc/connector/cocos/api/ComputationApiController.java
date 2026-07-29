@@ -116,4 +116,33 @@ public class ComputationApiController {
         var encoded = Base64.getEncoder().encodeToString(result.getContent());
         return Response.ok(new AttestationProxyResponse(encoded)).build();
     }
+
+    @jakarta.ws.rs.DELETE
+    @Path("/computations/{jobId}")
+    public Response stopComputation(@PathParam("jobId") String jobId) {
+        var result = orchestrator.stopJob(jobId);
+        if (result.failed()) {
+            return Response.status(Response.Status.BAD_REQUEST)
+                    .entity(Map.of("error", result.getFailureDetail()))
+                    .build();
+        }
+        return Response.ok(Map.of("message", "Computation stop request processed successfully")).build();
+    }
+
+    @GET
+    @Path("/computations/{jobId}/state")
+    public Response getAgentState(@PathParam("jobId") String jobId) {
+        try {
+            String state = orchestrator.queryAgentState(jobId).get(5, java.util.concurrent.TimeUnit.SECONDS);
+            return Response.ok(Map.of("state", state)).build();
+        } catch (java.util.concurrent.TimeoutException te) {
+            return Response.status(Response.Status.GATEWAY_TIMEOUT)
+                    .entity(Map.of("error", "Timeout waiting for CVM agent state response"))
+                    .build();
+        } catch (Exception e) {
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
+                    .entity(Map.of("error", "Failed to query CVM agent state: " + e.getMessage()))
+                    .build();
+        }
+    }
 }

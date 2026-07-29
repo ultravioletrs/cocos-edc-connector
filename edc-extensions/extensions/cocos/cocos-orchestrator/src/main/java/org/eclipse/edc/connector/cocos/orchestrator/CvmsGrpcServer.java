@@ -184,6 +184,10 @@ public class CvmsGrpcServer {
             }
 
             // Agent connection: send the RunReq.
+            if ("agent".equals(connectionType)) {
+                org.eclipse.edc.connector.cocos.spi.CocosAgentConnectionRegistry.register(effectiveJobId, responseObserver);
+            }
+
             try {
                 byte[] publicKeyDer = readPublicKeyDer(publicKeyPath);
                 ComputationRunReq runReq = buildComputationRunReq(manifest, publicKeyDer);
@@ -232,17 +236,31 @@ public class CvmsGrpcServer {
                             monitor.info("Agent reported run complete successfully");
                             org.eclipse.edc.connector.cocos.spi.CocosAgentReadyRegistry.complete(resolvedKey);
                         }
+                    } else if (value.hasStopComputationRes()) {
+                        StopComputationResponse res = value.getStopComputationRes();
+                        monitor.info("Agent reported stop computation response: " + res.getMessage());
+                        org.eclipse.edc.connector.cocos.spi.CocosAgentStopRegistry.complete(resolvedKey, res.getMessage());
+                    } else if (value.hasAgentStateRes()) {
+                        AgentStateRes res = value.getAgentStateRes();
+                        monitor.info("Agent reported state: " + res.getState());
+                        org.eclipse.edc.connector.cocos.spi.CocosAgentStateRegistry.complete(resolvedKey, res.getState());
                     }
                 }
 
                 @Override
                 public void onError(Throwable t) {
                     monitor.severe("Error in stream from agent: " + t.getMessage(), t);
+                    if ("agent".equals(connectionType)) {
+                        org.eclipse.edc.connector.cocos.spi.CocosAgentConnectionRegistry.unregister(effectiveJobId, responseObserver);
+                    }
                 }
 
                 @Override
                 public void onCompleted() {
                     monitor.info("Stream completed by agent");
+                    if ("agent".equals(connectionType)) {
+                        org.eclipse.edc.connector.cocos.spi.CocosAgentConnectionRegistry.unregister(effectiveJobId, responseObserver);
+                    }
                     responseObserver.onCompleted();
                 }
             };
