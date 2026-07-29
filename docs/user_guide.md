@@ -56,6 +56,16 @@ The Cocos extension exposes a dedicated management API on the EDC Connector (typ
 * **Response**: Returns the status of the job execution.
   * `status`: `UPLOADING` | `COMPLETED` | `FAILED`
 
+### 3. Query Guest Agent State
+* **Endpoint**: `GET http://<connector-host>:49204/api/management/cocos/computations/{jobId}/state`
+* **Response**: Queries the Cocos Agent's internal state machine directly over the gRPC stream.
+  * **Payload**: `{"state": "Running"}` (or `"Complete"`, `"ReceivingManifest"`, `"Idle"`, etc.)
+
+### 4. Stop / Terminate Running Computation
+* **Endpoint**: `DELETE http://<connector-host>:49204/api/management/cocos/computations/{jobId}`
+* **Description**: Sends a `StopComputation` message to the CVM agent over the active stream, which cancels the context, tears down the ingress-proxy, and kills the Docker container inside the CVM.
+  * **Response**: `200 OK` with `{"message": "Computation stop request processed successfully"}`
+
 ---
 
 ## 🛡️ Key Management & Attestation (Trustee KBS)
