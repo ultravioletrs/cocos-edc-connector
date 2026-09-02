@@ -19,4 +19,9 @@ public class CocosAgentConnectionRegistry {
     public static void unregister(String jobId, Object observer) {
         REGISTRY.remove(jobId, observer);
     }
+
+    public static Map<String, Object> getAll() {
+        return java.util.Collections.unmodifiableMap(REGISTRY);
+    }
 }
+

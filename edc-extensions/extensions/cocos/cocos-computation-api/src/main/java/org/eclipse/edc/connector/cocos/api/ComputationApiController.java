@@ -145,4 +145,58 @@ public class ComputationApiController {
                     .build();
         }
     }
+
+    /**
+     * List all currently connected CVMs registered on the EDC Connector.
+     */
+    @GET
+    @Path("/cvms")
+    public Response getConnectedCvms() {
+        var connections = org.eclipse.edc.connector.cocos.spi.CocosAgentConnectionRegistry.getAll();
+        var cvmList = connections.keySet().stream().map(jobId -> {
+            var jobOpt = jobStore.findById(jobId);
+            var status = jobOpt.map(j -> j.getStatus().name()).orElse("CONNECTED");
+            var units = jobOpt.map(j -> j.getUnits().stream().map(u -> Map.of(
+                    "agentAddress", u.getAgentAddress(),
+                    "vmIp", u.getVmIp() != null ? u.getVmIp() : ""
+            )).collect(java.util.stream.Collectors.toList())).orElse(java.util.List.of());
+
+            return Map.of(
+                    "jobId", jobId,
+                    "status", status,
+                    "units", units
+            );
+        }).collect(java.util.stream.Collectors.toList());
+
+        return Response.ok(cvmList).build();
+    }
+
+    /**
+     * Download / retrieve automatically persisted result artifact zip for a computation job.
+     */
+    @GET
+    @Path("/computations/{jobId}/result")
+    @Produces(MediaType.APPLICATION_OCTET_STREAM)
+    public Response getComputationResult(@PathParam("jobId") String jobId) {
+        java.nio.file.Path file = java.nio.file.Paths.get("results", jobId + "-result.zip");
+        if (!java.nio.file.Files.exists(file)) {
+            return Response.status(Response.Status.NOT_FOUND)
+                    .entity(Map.of("error", "Result artifact not found for job: " + jobId))
+                    .type(MediaType.APPLICATION_JSON)
+                    .build();
+        }
+
+        try {
+            byte[] bytes = java.nio.file.Files.readAllBytes(file);
+            return Response.ok(bytes)
+                    .header("Content-Disposition", "attachment; filename=\"" + jobId + "-result.zip\"")
+                    .build();
+        } catch (Exception e) {
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
+                    .entity(Map.of("error", "Failed to read result artifact: " + e.getMessage()))
+                    .type(MediaType.APPLICATION_JSON)
+                    .build();
+        }
+    }
 }
+

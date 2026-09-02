@@ -186,10 +186,27 @@ public class ComputationOrchestratorImpl implements ComputationOrchestrator {
             if (result.failed()) {
                 throw new RuntimeException("Failed to fetch result from " + unit.getAgentAddress() + ": " + result.getFailureDetail());
             }
-            job.setResult(unit.getAgentAddress(), result.getContent());
+            byte[] content = result.getContent();
+            job.setResult(unit.getAgentAddress(), content);
             monitor.debug("Result collected from " + unit.getAgentAddress());
+
+            // Persist result payload automatically to host disk for persistent availability
+            if (content != null && content.length > 0) {
+                try {
+                    java.nio.file.Path resultsDir = java.nio.file.Paths.get("results");
+                    if (!java.nio.file.Files.exists(resultsDir)) {
+                        java.nio.file.Files.createDirectories(resultsDir);
+                    }
+                    java.nio.file.Path file = resultsDir.resolve(job.getJobId() + "-result.zip");
+                    java.nio.file.Files.write(file, content);
+                    monitor.info("Automatically persisted result artifact to " + file.toAbsolutePath());
+                } catch (Exception e) {
+                    monitor.warning("Failed to auto-persist result artifact to disk for job " + job.getJobId(), e);
+                }
+            }
         }
     }
+
 
     @Override
     public org.eclipse.edc.spi.result.Result<Void> stopJob(String jobId) {
