@@ -15,7 +15,15 @@ allprojects {
 subprojects {
     group = property("group") as String
     version = property("version") as String
+
+    plugins.withId("java") {
+        configure<JavaPluginExtension> {
+            sourceCompatibility = JavaVersion.VERSION_21
+            targetCompatibility = JavaVersion.VERSION_21
+        }
+    }
 }
+
 
 val extensionProjects = listOf(
     ":extensions:cocos:cocos-spi",
