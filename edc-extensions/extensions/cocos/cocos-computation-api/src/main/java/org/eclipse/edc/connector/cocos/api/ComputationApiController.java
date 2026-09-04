@@ -40,6 +40,16 @@ public class ComputationApiController {
     @POST
     @Path("/computations")
     public Response startComputation(ComputationRequest request) {
+        if (request == null || request.getJobId() == null || request.getJobId().trim().isEmpty()) {
+            return Response.status(Response.Status.BAD_REQUEST)
+                    .entity(Map.of("error", "ComputationRequest body and a valid jobId are required"))
+                    .build();
+        }
+        if (request.getUnits() == null || request.getUnits().isEmpty()) {
+            return Response.status(Response.Status.BAD_REQUEST)
+                    .entity(Map.of("error", "ComputationRequest must contain at least one computation unit"))
+                    .build();
+        }
         var jobId = orchestrator.start(request);
         return Response.accepted(Map.of("jobId", jobId)).build();
     }
