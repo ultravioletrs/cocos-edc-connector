@@ -13,13 +13,13 @@ public class CocosDataSinkExtension implements ServiceExtension {
 
     public static final String NAME = "CocosAI VM Data Sink";
 
-    @Inject
+    @Inject(required = false)
     private PipelineService pipelineService;
 
-    @Inject
+    @Inject(required = false)
     private DataTransferExecutorServiceContainer executorContainer;
 
-    @Inject
+    @Inject(required = false)
     private CocosCliService cliService;
 
     @Override
@@ -29,6 +29,11 @@ public class CocosDataSinkExtension implements ServiceExtension {
 
     @Override
     public void initialize(ServiceExtensionContext context) {
+        if (pipelineService == null || executorContainer == null || cliService == null) {
+            context.getMonitor().info("CocosAI VM Data Sink: Data plane services not available in this runtime, skipping data sink registration.");
+            return;
+        }
+
         var factory = new CocosVmDataSinkFactory(cliService, executorContainer.getExecutorService(), context.getMonitor());
         pipelineService.registerFactory(factory);
 
