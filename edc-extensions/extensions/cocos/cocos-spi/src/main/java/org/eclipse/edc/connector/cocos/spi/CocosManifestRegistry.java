@@ -4,21 +4,31 @@ import org.eclipse.edc.connector.cocos.spi.model.ComputeManifest;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.BiConsumer;
 
 public class CocosManifestRegistry {
 
     private static final Map<String, ComputeManifest> manifests = new ConcurrentHashMap<>();
     private static final Map<String, CompletableFuture<ComputeManifest>> waiters = new ConcurrentHashMap<>();
+    private static volatile BiConsumer<String, ComputeManifest> onManifestRegistered;
 
     private static volatile String latestJobId;
 
     private CocosManifestRegistry() {}
 
+    public static void setOnManifestRegistered(BiConsumer<String, ComputeManifest> listener) {
+        onManifestRegistered = listener;
+    }
+
     public static void register(String jobId, ComputeManifest manifest) {
         manifests.put(jobId, manifest);
         latestJobId = jobId;
-        // Complete any futures that are blocking on waitForManifest(jobId)
-        waiters.computeIfAbsent(jobId, k -> new CompletableFuture<>()).complete(manifest);
+        CompletableFuture<ComputeManifest> waiter = waiters.get(jobId);
+        if (waiter != null && !waiter.isDone()) {
+            waiter.complete(manifest);
+        } else if (onManifestRegistered != null) {
+            onManifestRegistered.accept(jobId, manifest);
+        }
     }
 
     public static ComputeManifest get(String jobId) {

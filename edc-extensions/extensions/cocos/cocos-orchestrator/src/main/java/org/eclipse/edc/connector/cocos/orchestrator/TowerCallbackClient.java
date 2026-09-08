@@ -47,6 +47,9 @@ public class TowerCallbackClient {
     }
 
     private void post(String url, Object body) {
+        if (url == null || url.trim().isEmpty()) {
+            return;
+        }
         try {
             var json = mapper.writeValueAsString(body);
             var request = new Request.Builder()
@@ -58,10 +61,8 @@ public class TowerCallbackClient {
                     monitor.warning("Tower callback returned non-success status: " + response.code());
                 }
             }
-        } catch (JsonProcessingException e) {
-            monitor.severe("Failed to serialise Tower callback body", e);
-        } catch (IOException e) {
-            monitor.severe("Failed to call Tower callback at " + url, e);
+        } catch (Exception e) {
+            monitor.warning("Failed to call Tower callback at " + url + ": " + e.getMessage());
         }
     }
 }

@@ -93,6 +93,8 @@ public class ComputationOrchestratorImpl implements ComputationOrchestrator {
             job.setStatus(ComputationJob.Status.FAILED);
             job.setErrorMessage(e.getMessage());
             towerCallbackClient.reportFailure(job);
+        } finally {
+            org.eclipse.edc.connector.cocos.spi.CocosManifestRegistry.remove(job.getJobId());
         }
     }
 
@@ -240,6 +242,7 @@ public class ComputationOrchestratorImpl implements ComputationOrchestrator {
             return org.eclipse.edc.spi.result.Result.failure("Failed to stop computation: " + e.getMessage());
         } finally {
             org.eclipse.edc.connector.cocos.spi.CocosAgentStopRegistry.remove(jobId);
+            org.eclipse.edc.connector.cocos.spi.CocosManifestRegistry.remove(jobId);
         }
     }
 
