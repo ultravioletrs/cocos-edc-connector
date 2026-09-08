@@ -64,7 +64,18 @@ public class CocosCliServiceImpl implements CocosCliService {
             Path tempFile = tempDir.resolve(filename);
             Files.write(tempFile, data);
 
-            String[] args = new String[]{"algo", tempFile.toAbsolutePath().toString(), privateKeyPath, "-a", "docker"};
+            String algoType = "bin";
+            if (filename != null) {
+                if (filename.endsWith(".py")) {
+                    algoType = "python";
+                } else if (filename.endsWith(".tar") || filename.endsWith(".tar.gz")) {
+                    algoType = "docker";
+                } else if (filename.endsWith(".wasm")) {
+                    algoType = "wasm";
+                }
+            }
+
+            String[] args = new String[]{"algo", tempFile.toAbsolutePath().toString(), privateKeyPath, "-a", algoType};
             Result<byte[]> result = runCliCommand(agentAddress, args, tempDir.toAbsolutePath().toString(), false, null);
             if (result.failed()) {
                 return Result.failure(result.getFailureDetail());
