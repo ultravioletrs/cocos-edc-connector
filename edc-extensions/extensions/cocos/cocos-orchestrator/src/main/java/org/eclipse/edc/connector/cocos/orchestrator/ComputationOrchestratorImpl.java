@@ -63,15 +63,7 @@ public class ComputationOrchestratorImpl implements ComputationOrchestrator {
 
             startAgents(job);
 
-            // Wait indefinitely for agent to report ready (via CVMS gRPC server RunResponse)
-            // Agent may come online at any time after job submission
-            try {
-                readyFuture.get();
-            } catch (Exception e) {
-                throw new RuntimeException("Agent failed to report ready on Job " + job.getJobId(), e);
-            } finally {
-                CocosAgentReadyRegistry.remove(job.getJobId());
-            }
+            waitForAgentReady(job, readyFuture);
 
             uploadAssets(job);
 
@@ -98,6 +90,51 @@ public class ComputationOrchestratorImpl implements ComputationOrchestrator {
         }
     }
 
+    private void waitForAgentReady(ComputationJob job, java.util.concurrent.CompletableFuture<Void> readyFuture) {
+        try {
+            while (true) {
+                try {
+                    readyFuture.get(5, java.util.concurrent.TimeUnit.SECONDS);
+                    return;
+                } catch (java.util.concurrent.TimeoutException ignored) {
+                    if (anyAgentPastManifestReceipt(job)) {
+                        monitor.info("Agent is already past manifest receipt for Job " + job.getJobId()
+                                + "; continuing with direct asset upload");
+                        return;
+                    }
+                }
+            }
+        } catch (Exception e) {
+            throw new RuntimeException("Agent failed to report ready on Job " + job.getJobId(), e);
+        } finally {
+            CocosAgentReadyRegistry.remove(job.getJobId());
+        }
+    }
+
+    private boolean anyAgentPastManifestReceipt(ComputationJob job) {
+        for (var unit : job.getUnits()) {
+            try {
+                var state = queryAgentState(job.getJobId()).get(5, java.util.concurrent.TimeUnit.SECONDS);
+                if (isReadyForAssetUpload(state)) {
+                    monitor.info("Agent " + unit.getAgentAddress() + " reported state " + state
+                            + " for Job " + job.getJobId());
+                    return true;
+                }
+            } catch (Exception e) {
+                monitor.debug("Agent readiness fallback state query failed for Job " + job.getJobId() + ": " + e.getMessage());
+            }
+        }
+        return false;
+    }
+
+    private boolean isReadyForAssetUpload(String state) {
+        return "ReceivingAlgorithm".equalsIgnoreCase(state)
+                || "ReceivingDataset".equalsIgnoreCase(state)
+                || "Running".equalsIgnoreCase(state)
+                || "Complete".equalsIgnoreCase(state)
+                || "Completed".equalsIgnoreCase(state);
+    }
+
     private void startAgents(ComputationJob job) {
         job.setStatus(ComputationJob.Status.STARTING_AGENTS);
         for (var unit : job.getUnits()) {
@@ -122,7 +159,7 @@ public class ComputationOrchestratorImpl implements ComputationOrchestrator {
         var algo = manifest.getAlgorithm();
         if (algo != null) {
             byte[] data = resolveAsset(unit.getAgentAddress(), jobId, algo.getSource(), algo.getProviderConnectorUrl());
-            var result = cliService.uploadAlgorithm(unit.getAgentAddress(), algo.getFilename(), data);
+            var result = cliService.uploadAlgorithm(unit.getAgentAddress(), algo.getFilename(), algo.getType(), data);
             if (result.failed()) {
                 throw new RuntimeException("Failed to upload algorithm " + algo.getFilename()
                         + " to " + unit.getAgentAddress() + ": " + result.getFailureDetail());
