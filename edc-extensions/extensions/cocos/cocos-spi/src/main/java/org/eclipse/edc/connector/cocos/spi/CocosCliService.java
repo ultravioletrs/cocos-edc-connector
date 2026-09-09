@@ -11,6 +11,10 @@ public interface CocosCliService {
 
     Result<Void> uploadAlgorithm(String vmIp, String filename, byte[] data);
 
+    default Result<Void> uploadAlgorithm(String vmIp, String filename, String algorithmType, byte[] data) {
+        return uploadAlgorithm(vmIp, filename, data);
+    }
+
     Result<byte[]> requestAttestation(String vmIp, String nonce);
 
     Result<byte[]> fetchResult(String vmIp);

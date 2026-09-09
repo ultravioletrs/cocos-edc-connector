@@ -43,6 +43,7 @@ class ComputationOrchestratorImplTest {
         var manifest = ComputeManifest.newInstance()
                 .algorithm(AlgorithmSpec.newInstance()
                         .filename("algo.py")
+                        .type("python")
                         .source(AssetSource.newInstance().type(AssetSource.Type.FILE).content("YWxnby1jb250ZW50").build())
                         .build())
                 .datasets(List.of(DatasetSpec.newInstance()
@@ -63,7 +64,7 @@ class ComputationOrchestratorImplTest {
                 .build();
 
         when(cliService.startAgent(eq(vmIp), any())).thenReturn(Result.success());
-        when(cliService.uploadAlgorithm(eq(vmIp), anyString(), any())).thenReturn(Result.success());
+        when(cliService.uploadAlgorithm(eq(vmIp), anyString(), anyString(), any())).thenReturn(Result.success());
         when(cliService.uploadDataset(eq(vmIp), anyString(), any())).thenReturn(Result.success());
         when(cliService.fetchResult(eq(vmIp))).thenReturn(Result.success("result-bytes".getBytes()));
 
@@ -81,7 +82,7 @@ class ComputationOrchestratorImplTest {
         // Wait for job execution to complete in the executor
         verify(callbackClient, timeout(2000)).reportSuccess(any(ComputationJob.class));
         verify(cliService).startAgent(eq(vmIp), any());
-        verify(cliService).uploadAlgorithm(eq(vmIp), eq("algo.py"), any());
+        verify(cliService).uploadAlgorithm(eq(vmIp), eq("algo.py"), eq("python"), any());
         verify(cliService).uploadDataset(eq(vmIp), eq("data.csv"), any());
         verify(cliService).fetchResult(eq(vmIp));
     }

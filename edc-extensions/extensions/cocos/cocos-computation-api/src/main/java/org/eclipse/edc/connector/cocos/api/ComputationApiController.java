@@ -139,6 +139,12 @@ public class ComputationApiController {
         return Response.ok(Map.of("message", "Computation stop request processed successfully")).build();
     }
 
+    @POST
+    @Path("/computations/{jobId}/stop")
+    public Response stopComputationPost(@PathParam("jobId") String jobId) {
+        return stopComputation(jobId);
+    }
+
     @GET
     @Path("/computations/{jobId}/state")
     public Response getAgentState(@PathParam("jobId") String jobId) {
@@ -209,4 +215,3 @@ public class ComputationApiController {
         }
     }
 }
-

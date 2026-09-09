@@ -58,22 +58,18 @@ public class CocosCliServiceImpl implements CocosCliService {
 
     @Override
     public Result<Void> uploadAlgorithm(String agentAddress, String filename, byte[] data) {
+        return uploadAlgorithm(agentAddress, filename, null, data);
+    }
+
+    @Override
+    public Result<Void> uploadAlgorithm(String agentAddress, String filename, String algorithmType, byte[] data) {
         Path tempDir = null;
         try {
             tempDir = Files.createTempDirectory("cocos-algo-");
             Path tempFile = tempDir.resolve(filename);
             Files.write(tempFile, data);
 
-            String algoType = "bin";
-            if (filename != null) {
-                if (filename.endsWith(".py")) {
-                    algoType = "python";
-                } else if (filename.endsWith(".tar") || filename.endsWith(".tar.gz")) {
-                    algoType = "docker";
-                } else if (filename.endsWith(".wasm")) {
-                    algoType = "wasm";
-                }
-            }
+            String algoType = resolveAlgorithmType(filename, algorithmType);
 
             String[] args = new String[]{"algo", tempFile.toAbsolutePath().toString(), privateKeyPath, "-a", algoType};
             Result<byte[]> result = runCliCommand(agentAddress, args, tempDir.toAbsolutePath().toString(), false, null);
@@ -86,6 +82,22 @@ public class CocosCliServiceImpl implements CocosCliService {
         } finally {
             cleanupTempDir(tempDir);
         }
+    }
+
+    private String resolveAlgorithmType(String filename, String algorithmType) {
+        if (algorithmType != null && !algorithmType.trim().isEmpty()) {
+            return algorithmType.trim().toLowerCase();
+        }
+        if (filename != null) {
+            if (filename.endsWith(".py")) {
+                return "python";
+            } else if (filename.endsWith(".tar") || filename.endsWith(".tar.gz")) {
+                return "docker";
+            } else if (filename.endsWith(".wasm")) {
+                return "wasm";
+            }
+        }
+        return "bin";
     }
 
     @Override
@@ -124,7 +136,7 @@ public class CocosCliServiceImpl implements CocosCliService {
         return new String[]{agentAddress, defaultPortStr};
     }
 
-    private void waitForAgent(String agentAddress) {
+    private Result<Void> waitForAgent(String agentAddress) {
         String[] hostPort = parseHostAndPort(agentAddress);
         String host = hostPort[0];
         int port;
@@ -144,25 +156,30 @@ public class CocosCliServiceImpl implements CocosCliService {
                     throw new java.io.IOException("Connection closed immediately by peer");
                 }
                 monitor.info("Cocos Agent is ready and listening on " + host + ":" + port);
-                return;
+                return Result.success();
             } catch (java.net.SocketTimeoutException ste) {
                 // Connection remains open (no data sent by gRPC server), indicating a live backend
                 monitor.info("Cocos Agent is ready and listening on " + host + ":" + port);
-                return;
+                return Result.success();
             } catch (Exception e) {
                 try {
                     Thread.sleep(1000);
                 } catch (InterruptedException ie) {
                     Thread.currentThread().interrupt();
-                    return;
+                    return Result.failure("Interrupted while waiting for Cocos Agent on " + host + ":" + port);
                 }
             }
         }
-        monitor.warning("Cocos Agent did not start listening on " + host + ":" + port + " within 30 seconds");
+        var message = "Cocos Agent did not become reachable on " + host + ":" + port + " within 30 seconds";
+        monitor.warning(message);
+        return Result.failure(message);
     }
 
     private Result<byte[]> runCliCommand(String agentAddress, String[] args, String workingDir, boolean readOutput, String outputFile) {
-        waitForAgent(agentAddress);
+        var readiness = waitForAgent(agentAddress);
+        if (readiness.failed()) {
+            return Result.failure(readiness.getFailureDetail());
+        }
         try {
             List<String> command = new ArrayList<>();
             command.add(cliBinaryPath);
@@ -177,13 +194,13 @@ public class CocosCliServiceImpl implements CocosCliService {
             String fullTargetUrl = hostPort[0] + ":" + hostPort[1];
             env.put("AGENT_GRPC_URL", fullTargetUrl);
             env.put("AGENT_GRPC_ATTESTED_TLS", "false");
+            monitor.info("Running Cocos CLI command '" + args[0] + "' against agent " + fullTargetUrl);
 
             Process process = pb.start();
 
             StringBuilder stdout = new StringBuilder();
             StringBuilder stderr = new StringBuilder();
 
-            // Read standard output on a separate thread to prevent blocking
             Thread stdoutThread = new Thread(() -> {
                 try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
                     String line;
@@ -194,21 +211,32 @@ public class CocosCliServiceImpl implements CocosCliService {
             });
             stdoutThread.start();
 
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getErrorStream()))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    stderr.append(line).append("\n");
-                }
+            Thread stderrThread = new Thread(() -> {
+                try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getErrorStream()))) {
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        stderr.append(line).append("\n");
+                    }
+                } catch (Exception ignored) {}
+            });
+            stderrThread.start();
+
+            boolean finished = process.waitFor(60, java.util.concurrent.TimeUnit.SECONDS);
+            if (!finished) {
+                process.destroyForcibly();
+                monitor.severe("Cocos CLI command timed out: " + String.join(" ", command));
+                return Result.failure("Cocos CLI command timed out after 60 seconds");
             }
 
             try {
-                stdoutThread.join();
+                stdoutThread.join(1000);
+                stderrThread.join(1000);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
-                monitor.warning("Interrupted while waiting for Cocos CLI stdout reader thread");
+                monitor.warning("Interrupted while waiting for Cocos CLI output reader threads");
             }
 
-            int exitCode = process.waitFor();
+            int exitCode = process.exitValue();
             String combinedOutput = stdout.toString().trim();
             if (combinedOutput.length() > 0) {
                 monitor.info("Cocos CLI output:\n" + combinedOutput);
@@ -216,8 +244,9 @@ public class CocosCliServiceImpl implements CocosCliService {
 
             boolean hasFailureIcon = combinedOutput.contains("❌");
             boolean hasFailedMessage = combinedOutput.toLowerCase().contains("failed to");
+            boolean hasUnavailableAgent = combinedOutput.toLowerCase().contains("agent service is unavailable");
 
-            if (exitCode != 0 || hasFailureIcon || hasFailedMessage) {
+            if (exitCode != 0 || hasFailureIcon || hasFailedMessage || hasUnavailableAgent) {
                 String errorMsg = stderr.toString().trim();
                 if (errorMsg.isEmpty()) {
                     errorMsg = combinedOutput;
