@@ -259,11 +259,13 @@ public class ComputationOrchestratorImpl implements ComputationOrchestrator {
 
         try {
             var future = org.eclipse.edc.connector.cocos.spi.CocosAgentStopRegistry.getOrCreate(jobId);
-            observer.onNext(org.eclipse.edc.connector.cocos.orchestrator.cvms.ServerStreamMessage.newBuilder()
-                    .setStopComputation(org.eclipse.edc.connector.cocos.orchestrator.cvms.StopComputation.newBuilder()
-                            .setComputationId(jobId)
-                            .build())
-                    .build());
+            synchronized (observer) {
+                observer.onNext(org.eclipse.edc.connector.cocos.orchestrator.cvms.ServerStreamMessage.newBuilder()
+                        .setStopComputation(org.eclipse.edc.connector.cocos.orchestrator.cvms.StopComputation.newBuilder()
+                                .setComputationId(jobId)
+                                .build())
+                        .build());
+            }
             
             future.get(5, java.util.concurrent.TimeUnit.SECONDS);
             
@@ -295,11 +297,13 @@ public class ComputationOrchestratorImpl implements ComputationOrchestrator {
 
         var future = org.eclipse.edc.connector.cocos.spi.CocosAgentStateRegistry.getOrCreate(jobId);
         try {
-            observer.onNext(org.eclipse.edc.connector.cocos.orchestrator.cvms.ServerStreamMessage.newBuilder()
-                    .setAgentStateReq(org.eclipse.edc.connector.cocos.orchestrator.cvms.AgentStateReq.newBuilder()
-                            .setId(jobId)
-                            .build())
-                    .build());
+            synchronized (observer) {
+                observer.onNext(org.eclipse.edc.connector.cocos.orchestrator.cvms.ServerStreamMessage.newBuilder()
+                        .setAgentStateReq(org.eclipse.edc.connector.cocos.orchestrator.cvms.AgentStateReq.newBuilder()
+                                .setId(jobId)
+                                .build())
+                        .build());
+            }
         } catch (Exception e) {
             org.eclipse.edc.connector.cocos.spi.CocosAgentStateRegistry.remove(jobId);
             return java.util.concurrent.CompletableFuture.failedFuture(e);

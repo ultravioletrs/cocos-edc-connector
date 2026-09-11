@@ -46,7 +46,7 @@ public class CvmsGrpcServer {
         CocosManifestRegistry.setOnManifestRegistered(this::sendRunRequestToConnectedAgent);
         server = ServerBuilder.forPort(port)
                 .addService(new CvmsServiceImpl())
-                .intercept(new RemoteAddressInterceptor())
+                .intercept(new RemoteAddressInterceptor(monitor))
                 .build()
                 .start();
         monitor.info("CVMS gRPC Server started on port " + port);
@@ -61,8 +61,12 @@ public class CvmsGrpcServer {
     }
 
     public void sendRunRequestToConnectedAgent(String jobId, ComputeManifest manifest) {
-        Object rawObserver = CocosAgentConnectionRegistry.get(jobId);
+        Object rawObserver = CocosAgentConnectionRegistry.claimForJob(jobId);
         if (rawObserver == null) {
+            return;
+        }
+        if (!CocosManifestRegistry.claimDispatch(jobId)) {
+            monitor.debug("Skipping duplicate computation run request for Job ID: " + jobId);
             return;
         }
         @SuppressWarnings("unchecked")
@@ -71,9 +75,9 @@ public class CvmsGrpcServer {
             byte[] publicKeyDer = readPublicKeyDer(publicKeyPath);
             ComputationRunReq runReq = buildComputationRunReq(manifest, publicKeyDer);
             monitor.info("Sending computation run request to existing connected agent for Job ID: " + jobId);
-            observer.onNext(ServerStreamMessage.newBuilder()
-                    .setRunReq(runReq)
-                    .build());
+            synchronized (observer) {
+                observer.onNext(ServerStreamMessage.newBuilder().setRunReq(runReq).build());
+            }
         } catch (Exception e) {
             monitor.severe("Failed to send computation run request to connected agent: " + e.getMessage(), e);
         }
@@ -84,6 +88,12 @@ public class CvmsGrpcServer {
     static final Context.Key<String> CONNECTION_TYPE_KEY = Context.key("connection-type");
 
     private static class RemoteAddressInterceptor implements ServerInterceptor {
+        private final Monitor monitor;
+
+        private RemoteAddressInterceptor(Monitor monitor) {
+            this.monitor = monitor;
+        }
+
         @Override
         public <ReqT, RespT> ServerCall.Listener<ReqT> interceptCall(
                 ServerCall<ReqT, RespT> call,
@@ -106,6 +116,9 @@ public class CvmsGrpcServer {
             if (connectionType == null) {
                 connectionType = "agent";
             }
+
+            monitor.info("CVMS metadata keys=" + headers.keys()
+                    + ", job-id=" + jobId + ", connection-type=" + connectionType);
 
             Context context = Context.current()
                     .withValue(CLIENT_IP_KEY, ip)
@@ -178,26 +191,34 @@ public class CvmsGrpcServer {
                 };
             }
 
-            if (jobId == null || jobId.isEmpty()) {
-                monitor.severe("Rejected connection from " + clientIp + ": missing job-id metadata header and no active job registered");
-                responseObserver.onError(new RuntimeException("Missing required job-id metadata header"));
-                return emptyObserver();
-            }
-
             // Agent connection: register immediately upon connection so status queries and stop requests work anytime.
             if ("agent".equals(connectionType)) {
-                org.eclipse.edc.connector.cocos.spi.CocosAgentConnectionRegistry.register(effectiveJobId, responseObserver);
+                if (effectiveJobId == null || effectiveJobId.isEmpty()) {
+                    Object previous = CocosAgentConnectionRegistry.registerIdle(responseObserver);
+                    if (previous instanceof StreamObserver<?> oldObserver && previous != responseObserver) {
+                        @SuppressWarnings("unchecked")
+                        StreamObserver<ServerStreamMessage> oldStream = (StreamObserver<ServerStreamMessage>) oldObserver;
+                        oldStream.onCompleted();
+                    }
+                    monitor.info("Registered idle agent connection for " + clientIp + "; waiting for a computation");
+                } else {
+                    CocosAgentConnectionRegistry.register(effectiveJobId, responseObserver);
+                }
                 monitor.info("Registered agent connection for Job ID: " + effectiveJobId + " from IP: " + clientIp);
 
                 // Asynchronously wait for or consume the manifest without blocking the gRPC transport thread.
-                CocosManifestRegistry.waitForManifest(effectiveJobId).thenAccept(manifest -> {
+                if (effectiveJobId != null && !effectiveJobId.isEmpty()) CocosManifestRegistry.waitForManifest(effectiveJobId).thenAccept(manifest -> {
+                    if (!CocosManifestRegistry.claimDispatch(effectiveJobId)) {
+                        monitor.debug("Skipping duplicate computation run request for Job ID: " + effectiveJobId);
+                        return;
+                    }
                     try {
                         byte[] publicKeyDer = readPublicKeyDer(publicKeyPath);
                         ComputationRunReq runReq = buildComputationRunReq(manifest, publicKeyDer);
                         monitor.info("Sending computation run request to agent " + clientIp + " for Job ID: " + effectiveJobId);
-                        responseObserver.onNext(ServerStreamMessage.newBuilder()
-                                .setRunReq(runReq)
-                                .build());
+                        synchronized (responseObserver) {
+                            responseObserver.onNext(ServerStreamMessage.newBuilder().setRunReq(runReq).build());
+                        }
                     } catch (Exception e) {
                         monitor.severe("Failed to build or send computation manifest to agent " + clientIp, e);
                     }
@@ -208,6 +229,10 @@ public class CvmsGrpcServer {
 
             return new StreamObserver<ClientStreamMessage>() {
 
+                private String jobKey() {
+                    return resolvedKey.isEmpty() ? CocosAgentConnectionRegistry.getJobId(responseObserver) : resolvedKey;
+                }
+
                 @Override
                 public void onNext(ClientStreamMessage value) {
                     if (value.hasAgentLog()) {
@@ -217,28 +242,28 @@ public class CvmsGrpcServer {
                         AgentEvent event = value.getAgentEvent();
                         monitor.info(String.format("[AgentEvent] [%s] %s (job: %s)", event.getEventType(), event.getStatus(), event.getComputationId()));
                         String targetJobId = (event.getComputationId() != null && !event.getComputationId().isEmpty())
-                                ? event.getComputationId() : resolvedKey;
+                                ? event.getComputationId() : jobKey();
                         handleAgentEvent(targetJobId, event);
                     } else if (value.hasRunRes()) {
                         RunResponse res = value.getRunRes();
                         if (res.getError() != null && !res.getError().isEmpty()) {
                             monitor.severe("Agent reported execution error: " + res.getError());
                             org.eclipse.edc.connector.cocos.spi.CocosAgentCompletionRegistry.fail(
-                                    resolvedKey, res.getError());
+                                    jobKey(), res.getError());
                             org.eclipse.edc.connector.cocos.spi.CocosAgentReadyRegistry.fail(
-                                    resolvedKey, res.getError());
+                                    jobKey(), res.getError());
                         } else {
                             monitor.info("Agent reported run complete successfully");
-                            org.eclipse.edc.connector.cocos.spi.CocosAgentReadyRegistry.complete(resolvedKey);
+                            org.eclipse.edc.connector.cocos.spi.CocosAgentReadyRegistry.complete(jobKey());
                         }
                     } else if (value.hasStopComputationRes()) {
                         StopComputationResponse res = value.getStopComputationRes();
                         monitor.info("Agent reported stop computation response: " + res.getMessage());
-                        org.eclipse.edc.connector.cocos.spi.CocosAgentStopRegistry.complete(resolvedKey, res.getMessage());
+                        org.eclipse.edc.connector.cocos.spi.CocosAgentStopRegistry.complete(jobKey(), res.getMessage());
                     } else if (value.hasAgentStateRes()) {
                         AgentStateRes res = value.getAgentStateRes();
                         monitor.info("Agent reported state: " + res.getState());
-                        org.eclipse.edc.connector.cocos.spi.CocosAgentStateRegistry.complete(resolvedKey, res.getState());
+                        org.eclipse.edc.connector.cocos.spi.CocosAgentStateRegistry.complete(jobKey(), res.getState());
                     }
                 }
 
@@ -246,7 +271,7 @@ public class CvmsGrpcServer {
                 public void onError(Throwable t) {
                     monitor.severe("Error in stream from agent: " + t.getMessage(), t);
                     if ("agent".equals(connectionType)) {
-                        org.eclipse.edc.connector.cocos.spi.CocosAgentConnectionRegistry.unregister(effectiveJobId, responseObserver);
+                        org.eclipse.edc.connector.cocos.spi.CocosAgentConnectionRegistry.unregister(jobKey() == null ? CocosAgentConnectionRegistry.IDLE_KEY : jobKey(), responseObserver);
                     }
                 }
 
@@ -254,7 +279,7 @@ public class CvmsGrpcServer {
                 public void onCompleted() {
                     monitor.info("Stream completed by agent");
                     if ("agent".equals(connectionType)) {
-                        org.eclipse.edc.connector.cocos.spi.CocosAgentConnectionRegistry.unregister(effectiveJobId, responseObserver);
+                        org.eclipse.edc.connector.cocos.spi.CocosAgentConnectionRegistry.unregister(jobKey() == null ? CocosAgentConnectionRegistry.IDLE_KEY : jobKey(), responseObserver);
                     }
                     responseObserver.onCompleted();
                 }
@@ -269,6 +294,7 @@ public class CvmsGrpcServer {
             String eventType = event.getEventType();
 
             if ("InProgress".equalsIgnoreCase(status) || "ReceivingAlgorithm".equalsIgnoreCase(eventType)) {
+                CocosManifestRegistry.markAccepted(targetJobId);
                 org.eclipse.edc.connector.cocos.spi.CocosAgentReadyRegistry.complete(targetJobId);
             }
 

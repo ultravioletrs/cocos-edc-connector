@@ -10,6 +10,8 @@ public class CocosManifestRegistry {
 
     private static final Map<String, ComputeManifest> manifests = new ConcurrentHashMap<>();
     private static final Map<String, CompletableFuture<ComputeManifest>> waiters = new ConcurrentHashMap<>();
+    private static final Map<String, Integer> dispatchAttempts = new ConcurrentHashMap<>();
+    private static final java.util.Set<String> accepted = ConcurrentHashMap.newKeySet();
     private static volatile BiConsumer<String, ComputeManifest> onManifestRegistered;
 
     private static volatile String latestJobId;
@@ -37,6 +39,28 @@ public class CocosManifestRegistry {
 
     public static void remove(String jobId) {
         manifests.remove(jobId);
+        dispatchAttempts.remove(jobId);
+        accepted.remove(jobId);
+        if (jobId != null && jobId.equals(latestJobId)) {
+            latestJobId = null;
+        }
+    }
+
+    /**
+     * Claims the manifest dispatch for a job. Reconnecting agents must not receive
+     * duplicate run requests for the same computation lifecycle.
+     */
+    public static boolean claimDispatch(String jobId) {
+        if (jobId == null || accepted.contains(jobId)) {
+            return false;
+        }
+        return dispatchAttempts.compute(jobId, (key, attempts) -> attempts == null ? 1 : attempts + 1) <= 2;
+    }
+
+    public static void markAccepted(String jobId) {
+        if (jobId != null) {
+            accepted.add(jobId);
+        }
     }
 
     /**
