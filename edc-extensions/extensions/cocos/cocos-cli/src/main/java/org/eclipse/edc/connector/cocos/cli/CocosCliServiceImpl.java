@@ -11,6 +11,7 @@ import java.io.File;
 import java.io.InputStreamReader;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Base64;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -20,12 +21,18 @@ public class CocosCliServiceImpl implements CocosCliService {
 
     private final String cliBinaryPath;
     private final String privateKeyPath;
+    private final String teeType;
     private final Monitor monitor;
 
-    public CocosCliServiceImpl(String cliBinaryPath, String privateKeyPath, Monitor monitor) {
+    public CocosCliServiceImpl(String cliBinaryPath, String privateKeyPath, String teeType, Monitor monitor) {
         this.cliBinaryPath = cliBinaryPath;
         this.privateKeyPath = privateKeyPath;
+        this.teeType = teeType;
         this.monitor = monitor;
+    }
+
+    public CocosCliServiceImpl(String cliBinaryPath, String privateKeyPath, Monitor monitor) {
+        this(cliBinaryPath, privateKeyPath, "snp", monitor);
     }
 
     @Override
@@ -102,8 +109,27 @@ public class CocosCliServiceImpl implements CocosCliService {
 
     @Override
     public Result<byte[]> requestAttestation(String agentAddress, String nonce) {
-        String[] args = new String[]{"attestation", privateKeyPath, "--nonce", nonce};
-        return runCliCommand(agentAddress, args, null, false, null);
+        Path tempDir = null;
+        try {
+            tempDir = Files.createTempDirectory("cocos-attestation-");
+            // The HTTP/KBS contract carries nonce as base64; cocos-cli expects hex.
+            byte[] nonceBytes = Base64.getDecoder().decode(nonce);
+            StringBuilder hexNonce = new StringBuilder();
+            for (byte value : nonceBytes) {
+                hexNonce.append(String.format("%02x", value));
+            }
+            String[] args = new String[]{"attestation", "get", teeType, "--tee", hexNonce.toString()};
+            Result<byte[]> result = runCliCommand(agentAddress, args,
+                    tempDir.toAbsolutePath().toString(), true, "attestation.bin");
+            if (result.failed()) {
+                return Result.failure(result.getFailureDetail());
+            }
+            return Result.success(result.getContent());
+        } catch (Exception e) {
+            return Result.failure("Failed to fetch attestation: " + e.getMessage());
+        } finally {
+            cleanupTempDir(tempDir);
+        }
     }
 
     @Override
