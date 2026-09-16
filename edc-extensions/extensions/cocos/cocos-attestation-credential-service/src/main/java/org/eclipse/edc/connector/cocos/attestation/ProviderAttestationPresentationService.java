@@ -104,9 +104,9 @@ public class ProviderAttestationPresentationService implements PresentationReque
         var statusJwt = verifyResult.getContent();
 
         monitor.debug("Provider attestation: obtained report for VM " + vmIp
-                + ", requesting VP from Identity Hub");
+                + ", requesting VP from Attestation Credential Service");
 
-        // Step 5: exchange the Status JWT for a VP at the Identity Hub
+        // Step 5: exchange the Status JWT for a VP at the Attestation Credential Service
         return client.requestPresentation(
                 participantContextId,
                 ownDid,

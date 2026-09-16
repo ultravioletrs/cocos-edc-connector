@@ -18,6 +18,10 @@ public class CocosCliExtension implements ServiceExtension {
     @Setting(description = "Absolute path to the private key used by the CLI", key = "cocos.cli.privateKey.path", required = true)
     private String privateKeyPath;
 
+    @Setting(description = "TEE platform used for attestation (snp or tdx)",
+            key = "cocos.tee.type", defaultValue = "snp")
+    private String teeType;
+
     @Override
     public String name() {
         return NAME;
@@ -25,6 +29,6 @@ public class CocosCliExtension implements ServiceExtension {
 
     @Provider
     public CocosCliService cocosCliService(ServiceExtensionContext context) {
-        return new CocosCliServiceImpl(cliBinaryPath, privateKeyPath, context.getMonitor());
+        return new CocosCliServiceImpl(cliBinaryPath, privateKeyPath, teeType, context.getMonitor());
     }
 }

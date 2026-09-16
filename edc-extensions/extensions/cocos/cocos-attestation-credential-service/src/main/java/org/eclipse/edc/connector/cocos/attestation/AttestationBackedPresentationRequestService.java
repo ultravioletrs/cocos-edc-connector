@@ -66,7 +66,7 @@ public class AttestationBackedPresentationRequestService implements Presentation
         }
         var statusJwt = verifyResult.getContent();
 
-        monitor.debug("Attestation report verified with Trustee KBS, requesting VP from Identity Hub");
+        monitor.debug("Attestation report verified with Trustee KBS, requesting VP from Attestation Credential Service");
 
         // 4. Request Verifiable Presentation from UMU Attestation Credential Service using Status JWT and CVM IP
         return client.requestPresentation(
