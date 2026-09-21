@@ -76,7 +76,7 @@ public class CvmsGrpcServer {
             ComputationRunReq runReq = buildComputationRunReq(manifest, publicKeyDer);
             monitor.info("Sending computation run request to existing connected agent for Job ID: " + jobId);
             synchronized (observer) {
-                observer.onNext(ServerStreamMessage.newBuilder().setRunReq(runReq).build());
+                sendRunRequest(observer, runReq);
             }
         } catch (Exception e) {
             monitor.severe("Failed to send computation run request to connected agent: " + e.getMessage(), e);
@@ -217,7 +217,7 @@ public class CvmsGrpcServer {
                         ComputationRunReq runReq = buildComputationRunReq(manifest, publicKeyDer);
                         monitor.info("Sending computation run request to agent " + clientIp + " for Job ID: " + effectiveJobId);
                         synchronized (responseObserver) {
-                            responseObserver.onNext(ServerStreamMessage.newBuilder().setRunReq(runReq).build());
+                            sendRunRequest(responseObserver, runReq);
                         }
                     } catch (Exception e) {
                         monitor.severe("Failed to build or send computation manifest to agent " + clientIp, e);
@@ -259,11 +259,17 @@ public class CvmsGrpcServer {
                     } else if (value.hasStopComputationRes()) {
                         StopComputationResponse res = value.getStopComputationRes();
                         monitor.info("Agent reported stop computation response: " + res.getMessage());
-                        org.eclipse.edc.connector.cocos.spi.CocosAgentStopRegistry.complete(jobKey(), res.getMessage());
+                        String key = jobKey();
+                        if (key != null) {
+                            org.eclipse.edc.connector.cocos.spi.CocosAgentStopRegistry.complete(key, res.getMessage());
+                        }
                     } else if (value.hasAgentStateRes()) {
                         AgentStateRes res = value.getAgentStateRes();
                         monitor.info("Agent reported state: " + res.getState());
-                        org.eclipse.edc.connector.cocos.spi.CocosAgentStateRegistry.complete(jobKey(), res.getState());
+                        String key = jobKey();
+                        if (key != null) {
+                            org.eclipse.edc.connector.cocos.spi.CocosAgentStateRegistry.complete(key, res.getState());
+                        }
                     }
                 }
 
@@ -271,7 +277,9 @@ public class CvmsGrpcServer {
                 public void onError(Throwable t) {
                     monitor.severe("Error in stream from agent: " + t.getMessage(), t);
                     if ("agent".equals(connectionType)) {
-                        org.eclipse.edc.connector.cocos.spi.CocosAgentConnectionRegistry.unregister(jobKey() == null ? CocosAgentConnectionRegistry.IDLE_KEY : jobKey(), responseObserver);
+                        String key = jobKey();
+                        CocosManifestRegistry.resetDispatch(key);
+                        org.eclipse.edc.connector.cocos.spi.CocosAgentConnectionRegistry.unregister(key == null ? CocosAgentConnectionRegistry.IDLE_KEY : key, responseObserver);
                     }
                 }
 
@@ -279,7 +287,9 @@ public class CvmsGrpcServer {
                 public void onCompleted() {
                     monitor.info("Stream completed by agent");
                     if ("agent".equals(connectionType)) {
-                        org.eclipse.edc.connector.cocos.spi.CocosAgentConnectionRegistry.unregister(jobKey() == null ? CocosAgentConnectionRegistry.IDLE_KEY : jobKey(), responseObserver);
+                        String key = jobKey();
+                        CocosManifestRegistry.resetDispatch(key);
+                        org.eclipse.edc.connector.cocos.spi.CocosAgentConnectionRegistry.unregister(key == null ? CocosAgentConnectionRegistry.IDLE_KEY : key, responseObserver);
                     }
                     responseObserver.onCompleted();
                 }
@@ -324,7 +334,8 @@ public class CvmsGrpcServer {
                         byte[] digest = java.security.MessageDigest.getInstance("SHA3-256").digest(contentBytes);
                         dsHash = java.util.HexFormat.of().formatHex(digest);
                     } catch (Exception ignored) {}
-                }
+    }
+
                 Dataset.Builder db = Dataset.newBuilder()
                         .setFilename(datasetSpec.getFilename())
                         .setHash(hexToByteString(dsHash))
@@ -398,6 +409,35 @@ public class CvmsGrpcServer {
 
             return builder.build();
         }
+
+    /**
+     * Cocos agents assemble manifests from the CVMS chunk stream before starting
+     * their computation server. Keep the connector on that wire format so large
+     * and small manifests follow the same path.
+     */
+    private void sendRunRequest(StreamObserver<ServerStreamMessage> observer, ComputationRunReq runReq) {
+        byte[] data = runReq.toByteArray();
+        final int chunkSize = 4096;
+        if (data.length == 0) {
+            observer.onNext(ServerStreamMessage.newBuilder()
+                    .setRunReqChunks(RunReqChunks.newBuilder()
+                            .setId(runReq.getId())
+                            .setIsLast(true)
+                            .build())
+                    .build());
+            return;
+        }
+        for (int offset = 0; offset < data.length; offset += chunkSize) {
+            int end = Math.min(offset + chunkSize, data.length);
+            observer.onNext(ServerStreamMessage.newBuilder()
+                    .setRunReqChunks(RunReqChunks.newBuilder()
+                            .setId(runReq.getId())
+                            .setData(ByteString.copyFrom(data, offset, end - offset))
+                            .setIsLast(end == data.length)
+                            .build())
+                    .build());
+        }
+    }
 
         private ByteString hexToByteString(String hex) {
             if (hex == null || hex.isEmpty()) {

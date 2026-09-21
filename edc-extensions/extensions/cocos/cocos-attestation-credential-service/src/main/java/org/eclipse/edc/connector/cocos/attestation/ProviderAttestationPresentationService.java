@@ -85,8 +85,14 @@ public class ProviderAttestationPresentationService implements PresentationReque
         monitor.debug("Provider attestation: requesting report for VM " + vmIp
                 + " (job " + jobId + ") via Consumer proxy at " + consumerProxyBaseUrl);
 
+        var reportDataResult = kbsClient.reportData(kbsNonce, teeType);
+        if (reportDataResult.failed()) {
+            return Result.failure("Provider attestation: failed to prepare KBS runtime-data binding: "
+                    + reportDataResult.getFailureDetail());
+        }
+
         // Step 3: call the Consumer Connector's attestation proxy to get the report
-        var reportResult = proxyClient.fetchReport(consumerProxyBaseUrl, jobId, vmIp, kbsNonce);
+        var reportResult = proxyClient.fetchReport(consumerProxyBaseUrl, jobId, vmIp, reportDataResult.getContent());
         if (reportResult.failed()) {
             return Result.failure("Provider attestation: failed to obtain attestation report via proxy: "
                     + reportResult.getFailureDetail());

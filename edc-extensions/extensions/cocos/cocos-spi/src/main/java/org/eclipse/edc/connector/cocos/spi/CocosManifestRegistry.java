@@ -54,7 +54,14 @@ public class CocosManifestRegistry {
         if (jobId == null || accepted.contains(jobId)) {
             return false;
         }
-        return dispatchAttempts.compute(jobId, (key, attempts) -> attempts == null ? 1 : attempts + 1) <= 2;
+        return dispatchAttempts.putIfAbsent(jobId, 1) == null;
+    }
+
+    /** Allow a reconnecting agent to receive the same manifest on a new stream. */
+    public static void resetDispatch(String jobId) {
+        if (jobId != null && !accepted.contains(jobId)) {
+            dispatchAttempts.remove(jobId);
+        }
     }
 
     public static void markAccepted(String jobId) {

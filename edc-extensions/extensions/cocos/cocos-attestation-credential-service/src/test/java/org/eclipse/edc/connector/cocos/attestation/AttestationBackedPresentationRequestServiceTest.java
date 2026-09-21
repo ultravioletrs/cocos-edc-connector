@@ -52,9 +52,10 @@ class AttestationBackedPresentationRequestServiceTest {
         // Mock Trustee Authentication
         when(kbsClient.authenticate(teeType)).thenReturn(
                 Result.success(new KbsClient.KbsAuthResult(kbsNonce, sessionCookie)));
+        when(kbsClient.reportData(kbsNonce, teeType)).thenReturn(Result.success("bound-report-data"));
 
         // Mock CLI fetching attestation report
-        when(cliService.requestAttestation(vmIp, kbsNonce)).thenReturn(Result.success(rawReport));
+        when(cliService.requestAttestation(vmIp, kbsNonce, "bound-report-data")).thenReturn(Result.success(rawReport));
 
         // Mock Trustee Verification
         when(kbsClient.verify(rawReport, kbsNonce, sessionCookie, teeType)).thenReturn(Result.success(statusJwt));
@@ -71,7 +72,8 @@ class AttestationBackedPresentationRequestServiceTest {
         assertThat(result.succeeded()).isTrue();
 
         verify(kbsClient).authenticate(teeType);
-        verify(cliService).requestAttestation(vmIp, kbsNonce);
+        verify(kbsClient).reportData(kbsNonce, teeType);
+        verify(cliService).requestAttestation(vmIp, kbsNonce, "bound-report-data");
         verify(kbsClient).verify(rawReport, kbsNonce, sessionCookie, teeType);
         verify(client).requestPresentation(
                 "context-id", "own-did", "counter-did", "counter-token", List.of("scope1"), statusJwt, vmIp);

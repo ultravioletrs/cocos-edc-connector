@@ -79,8 +79,8 @@ class CvmsGrpcServerTest {
         verify(responseObserver, timeout(2000)).onNext(messageCaptor.capture());
 
         var sentMessage = messageCaptor.getValue();
-        assertThat(sentMessage.hasRunReq()).isTrue();
-        assertThat(sentMessage.getRunReq().getId()).isEqualTo("manifest-id");
+        assertThat(sentMessage.hasRunReqChunks()).isTrue();
+        assertThat(sentMessage.getRunReqChunks().getId()).isEqualTo("manifest-id");
 
         var completionFuture = CocosAgentCompletionRegistry.getOrCreate(jobId);
         var readyFuture = CocosAgentReadyRegistry.getOrCreate(jobId);

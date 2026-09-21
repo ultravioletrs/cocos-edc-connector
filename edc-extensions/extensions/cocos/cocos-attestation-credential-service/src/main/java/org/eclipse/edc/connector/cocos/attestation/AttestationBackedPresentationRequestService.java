@@ -50,8 +50,12 @@ public class AttestationBackedPresentationRequestService implements Presentation
             return Result.failure("No active CocosAI VM in context — attestation cannot proceed");
         }
 
-        // 2. Request attestation report from CVM using Trustee KBS nonce
-        var attestationResult = cliService.requestAttestation(vmIp, kbsNonce);
+        // 2. Bind the KBS runtime data into TDX REPORT_DATA before requesting evidence.
+        var reportDataResult = kbsClient.reportData(kbsNonce, teeType);
+        if (reportDataResult.failed()) {
+            return Result.failure("Failed to prepare KBS runtime-data binding: " + reportDataResult.getFailureDetail());
+        }
+        var attestationResult = cliService.requestAttestation(vmIp, kbsNonce, reportDataResult.getContent());
         if (attestationResult.failed()) {
             return Result.failure("Failed to obtain attestation report from VM " + vmIp
                     + ": " + attestationResult.getFailureDetail());

@@ -17,5 +17,10 @@ public interface CocosCliService {
 
     Result<byte[]> requestAttestation(String vmIp, String nonce);
 
+    /** Fetch evidence with report data already bound to a KBS runtime-data payload. */
+    default Result<byte[]> requestAttestation(String vmIp, String nonce, String reportData) {
+        return requestAttestation(vmIp, reportData);
+    }
+
     Result<byte[]> fetchResult(String vmIp);
 }

@@ -109,11 +109,20 @@ public class CocosCliServiceImpl implements CocosCliService {
 
     @Override
     public Result<byte[]> requestAttestation(String agentAddress, String nonce) {
+        return requestAttestationWithReportData(agentAddress, nonce);
+    }
+
+    @Override
+    public Result<byte[]> requestAttestation(String agentAddress, String nonce, String reportData) {
+        return requestAttestationWithReportData(agentAddress, reportData);
+    }
+
+    private Result<byte[]> requestAttestationWithReportData(String agentAddress, String reportData) {
         Path tempDir = null;
         try {
             tempDir = Files.createTempDirectory("cocos-attestation-");
             // The HTTP/KBS contract carries nonce as base64; cocos-cli expects hex.
-            byte[] nonceBytes = Base64.getDecoder().decode(nonce);
+            byte[] nonceBytes = Base64.getDecoder().decode(reportData);
             StringBuilder hexNonce = new StringBuilder();
             for (byte value : nonceBytes) {
                 hexNonce.append(String.format("%02x", value));
@@ -176,15 +185,9 @@ public class CocosCliServiceImpl implements CocosCliService {
         for (int i = 0; i < maxRetries; i++) {
             try (java.net.Socket socket = new java.net.Socket()) {
                 socket.connect(new java.net.InetSocketAddress(host, port), 1000);
-                socket.setSoTimeout(500);
-                int bytesRead = socket.getInputStream().read();
-                if (bytesRead == -1) {
-                    throw new java.io.IOException("Connection closed immediately by peer");
-                }
-                monitor.info("Cocos Agent is ready and listening on " + host + ":" + port);
-                return Result.success();
-            } catch (java.net.SocketTimeoutException ste) {
-                // Connection remains open (no data sent by gRPC server), indicating a live backend
+                // The guest endpoint is an h2c/gRPC proxy. It may close a raw
+                // TCP probe because no HTTP/2 preface was sent; a completed TCP
+                // connect is the readiness signal we need here.
                 monitor.info("Cocos Agent is ready and listening on " + host + ":" + port);
                 return Result.success();
             } catch (Exception e) {
@@ -220,6 +223,9 @@ public class CocosCliServiceImpl implements CocosCliService {
             String fullTargetUrl = hostPort[0] + ":" + hostPort[1];
             env.put("AGENT_GRPC_URL", fullTargetUrl);
             env.put("AGENT_GRPC_ATTESTED_TLS", "false");
+            // The forwarded ingress endpoint is h2c and does not expose the
+            // preflight health RPC reliably; the actual CLI RPC is authoritative.
+            env.put("AGENT_GRPC_SKIP_HEALTH", "true");
             monitor.info("Running Cocos CLI command '" + args[0] + "' against agent " + fullTargetUrl);
 
             Process process = pb.start();

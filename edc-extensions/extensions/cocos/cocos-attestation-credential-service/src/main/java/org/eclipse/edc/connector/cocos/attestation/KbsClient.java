@@ -4,6 +4,7 @@ import org.eclipse.edc.spi.result.Result;
 
 public interface KbsClient {
     Result<KbsAuthResult> authenticate(String teeType);
+    Result<String> reportData(String nonce, String teeType);
     Result<String> verify(byte[] attestationReport, String nonce, String sessionCookie, String teeType);
 
     class KbsAuthResult {
