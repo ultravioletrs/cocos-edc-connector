@@ -2,6 +2,7 @@ package org.eclipse.edc.connector.cocos.attestation;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.eclipse.edc.connector.cocos.spi.CocosCliService;
+import org.eclipse.edc.connector.cocos.spi.ComputationJobStore;
 import org.eclipse.edc.http.spi.EdcHttpClient;
 import org.eclipse.edc.iam.decentralizedclaims.spi.PresentationRequestService;
 import org.eclipse.edc.runtime.metamodel.annotation.Extension;
@@ -10,6 +11,7 @@ import org.eclipse.edc.runtime.metamodel.annotation.Provider;
 import org.eclipse.edc.runtime.metamodel.annotation.Setting;
 import org.eclipse.edc.spi.system.ServiceExtension;
 import org.eclipse.edc.spi.system.ServiceExtensionContext;
+import org.eclipse.edc.web.spi.WebService;
 
 /**
  * EDC extension that registers the CocosAI attestation-backed credential service.
@@ -74,9 +76,21 @@ public class CocosAttestationExtension implements ServiceExtension {
     @Inject
     private EdcHttpClient httpClient;
 
+    @Inject
+    private WebService webService;
+
+    @Inject
+    private ComputationJobStore jobStore;
+
     @Override
     public String name() {
         return NAME;
+    }
+
+    @Override
+    public void initialize(ServiceExtensionContext context) {
+        webService.registerResource("management", new TemporaryAttestationTokenController(
+                cliService, jobStore, httpClient, kbsUrl, teeType, context.getMonitor()));
     }
 
     @Provider

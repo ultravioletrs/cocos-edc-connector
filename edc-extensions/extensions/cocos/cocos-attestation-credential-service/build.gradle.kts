@@ -7,6 +7,7 @@ dependencies {
     api(libs.edc.decentralized.claims.spi)
     implementation(libs.edc.core.spi)
     implementation(libs.edc.http.spi)
+    implementation(libs.edc.web.spi)
     implementation(libs.jackson.databind)
 
     testImplementation(libs.junit.jupiter.api)
