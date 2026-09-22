@@ -10,17 +10,21 @@ public class ComputationRequest {
 
     private String jobId;
     private String towerCallbackUrl;
+    private boolean externalAssetUpload;
     private List<ComputationUnit> units = new ArrayList<>();
 
     public ComputationRequest() {}
 
     public void setJobId(String jobId) { this.jobId = jobId; }
     public void setTowerCallbackUrl(String url) { this.towerCallbackUrl = url; }
+    public void setExternalAssetUpload(boolean externalAssetUpload) { this.externalAssetUpload = externalAssetUpload; }
     public void setUnits(List<ComputationUnit> units) { this.units = units; }
 
     public String getJobId() { return jobId; }
 
     public String getTowerCallbackUrl() { return towerCallbackUrl; }
+
+    public boolean isExternalAssetUpload() { return externalAssetUpload; }
 
     public List<ComputationUnit> getUnits() { return units; }
 
@@ -32,6 +36,11 @@ public class ComputationRequest {
         public Builder jobId(String jobId) { instance.jobId = jobId; return this; }
 
         public Builder towerCallbackUrl(String url) { instance.towerCallbackUrl = url; return this; }
+
+        public Builder externalAssetUpload(boolean externalAssetUpload) {
+            instance.externalAssetUpload = externalAssetUpload;
+            return this;
+        }
 
         public Builder units(List<ComputationUnit> units) { instance.units = units; return this; }
 

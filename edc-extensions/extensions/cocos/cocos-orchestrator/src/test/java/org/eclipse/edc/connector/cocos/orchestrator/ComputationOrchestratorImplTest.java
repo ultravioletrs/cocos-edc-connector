@@ -86,4 +86,43 @@ class ComputationOrchestratorImplTest {
         verify(cliService).uploadDataset(eq(vmIp), eq("data.csv"), any());
         verify(cliService).fetchResult(eq(vmIp));
     }
+
+    @Test
+    void externalAssetUpload_skipsConnectorOwnedAssetTransfers() throws Exception {
+        String jobId = "external-job";
+        String vmIp = "192.168.1.101";
+        var manifest = ComputeManifest.newInstance()
+                .algorithm(AlgorithmSpec.newInstance()
+                        .filename("model.tar")
+                        .type("docker")
+                        .source(AssetSource.newInstance().type(AssetSource.Type.FILE).build())
+                        .build())
+                .datasets(List.of(DatasetSpec.newInstance()
+                        .filename("dataset.bin")
+                        .source(AssetSource.newInstance().type(AssetSource.Type.FILE).build())
+                        .build()))
+                .build();
+        var request = ComputationRequest.newInstance()
+                .jobId(jobId)
+                .externalAssetUpload(true)
+                .units(List.of(ComputationUnit.newInstance().vmIp(vmIp).manifest(manifest).build()))
+                .build();
+
+        when(cliService.startAgent(eq(vmIp), any())).thenReturn(Result.success());
+        when(cliService.fetchResult(eq(vmIp))).thenReturn(Result.success("result-bytes".getBytes()));
+
+        var scheduler = Executors.newSingleThreadScheduledExecutor();
+        scheduler.schedule(() -> {
+            CocosAgentReadyRegistry.complete(jobId);
+            CocosAgentCompletionRegistry.complete(jobId);
+            scheduler.shutdown();
+        }, 100, TimeUnit.MILLISECONDS);
+
+        assertThat(orchestrator.start(request)).isEqualTo(jobId);
+        verify(callbackClient, timeout(2000)).reportSuccess(any(ComputationJob.class));
+        verify(cliService).startAgent(eq(vmIp), any());
+        verify(cliService, never()).uploadAlgorithm(anyString(), anyString(), anyString(), any());
+        verify(cliService, never()).uploadDataset(anyString(), anyString(), any());
+        verify(cliService).fetchResult(eq(vmIp));
+    }
 }

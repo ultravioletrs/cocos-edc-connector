@@ -44,7 +44,8 @@ public class ComputationOrchestratorImpl implements ComputationOrchestrator {
 
     @Override
     public String start(ComputationRequest request) {
-        var job = new ComputationJob(request.getJobId(), request.getTowerCallbackUrl(), request.getUnits());
+        var job = new ComputationJob(request.getJobId(), request.getTowerCallbackUrl(), request.getUnits(),
+                request.isExternalAssetUpload());
         jobStore.save(job);
         executor.submit(() -> runJob(job));
         return job.getJobId();
@@ -65,16 +66,26 @@ public class ComputationOrchestratorImpl implements ComputationOrchestrator {
 
             waitForAgentReady(job, readyFuture);
 
-            uploadAssets(job);
+            if (job.isExternalAssetUpload()) {
+                job.setStatus(ComputationJob.Status.RUNNING);
+                monitor.info("External asset upload enabled for Job " + job.getJobId()
+                        + "; waiting for the caller to upload assets with cocos-cli");
+            } else {
+                uploadAssets(job);
+            }
 
             // Wait indefinitely for agent to report run complete via CVMS gRPC server event
             var completionFuture = CocosAgentCompletionRegistry.getOrCreate(job.getJobId());
-            try {
-                completionFuture.get();
-            } catch (Exception e) {
-                throw new RuntimeException("Computation run failed or timed out on Job " + job.getJobId(), e);
-            } finally {
-                CocosAgentCompletionRegistry.remove(job.getJobId());
+            if (job.isExternalAssetUpload()) {
+                waitForExternalCompletion(job, completionFuture);
+            } else {
+                try {
+                    completionFuture.get();
+                } catch (Exception e) {
+                    throw new RuntimeException("Computation run failed or timed out on Job " + job.getJobId(), e);
+                } finally {
+                    CocosAgentCompletionRegistry.remove(job.getJobId());
+                }
             }
 
             collectResults(job);
@@ -133,6 +144,42 @@ public class ComputationOrchestratorImpl implements ComputationOrchestrator {
                 || "Running".equalsIgnoreCase(state)
                 || "Complete".equalsIgnoreCase(state)
                 || "Completed".equalsIgnoreCase(state);
+    }
+
+    private void waitForExternalCompletion(ComputationJob job,
+                                           java.util.concurrent.CompletableFuture<Void> completionFuture) {
+        try {
+            // Some direct CLI flows do not emit the connector's completion event.
+            // Preserve event-based completion when available, then fall back to
+            // the agent state stream so large external uploads are observable.
+            try {
+                completionFuture.get(5, java.util.concurrent.TimeUnit.SECONDS);
+                return;
+            } catch (java.util.concurrent.TimeoutException ignored) {
+                // Continue with authoritative state polling below.
+            }
+
+            while (true) {
+                try {
+                    var state = queryAgentState(job.getJobId()).get(5, java.util.concurrent.TimeUnit.SECONDS);
+                    if ("ConsumingResults".equalsIgnoreCase(state)
+                            || "Complete".equalsIgnoreCase(state)
+                            || "Completed".equalsIgnoreCase(state)) {
+                        return;
+                    }
+                    if ("Failed".equalsIgnoreCase(state)
+                            || "FailedComputation".equalsIgnoreCase(state)) {
+                        throw new RuntimeException("Agent reported failed state for Job " + job.getJobId());
+                    }
+                } catch (java.util.concurrent.TimeoutException ignored) {
+                    monitor.debug("Waiting for external CLI upload on Job " + job.getJobId());
+                }
+            }
+        } catch (Exception e) {
+            throw new RuntimeException("External CLI computation failed for Job " + job.getJobId(), e);
+        } finally {
+            CocosAgentCompletionRegistry.remove(job.getJobId());
+        }
     }
 
     private void startAgents(ComputationJob job) {

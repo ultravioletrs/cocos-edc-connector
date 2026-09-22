@@ -14,14 +14,17 @@ public class ComputationJob {
     private final String jobId;
     private final String towerCallbackUrl;
     private final List<ComputationUnit> units;
+    private final boolean externalAssetUpload;
     private volatile Status status;
     private final Map<String, byte[]> results = new HashMap<>();
     private volatile String errorMessage;
 
-    public ComputationJob(String jobId, String towerCallbackUrl, List<ComputationUnit> units) {
+    public ComputationJob(String jobId, String towerCallbackUrl, List<ComputationUnit> units,
+                          boolean externalAssetUpload) {
         this.jobId = jobId;
         this.towerCallbackUrl = towerCallbackUrl;
         this.units = new ArrayList<>(units);
+        this.externalAssetUpload = externalAssetUpload;
         this.status = Status.PENDING;
     }
 
@@ -30,6 +33,8 @@ public class ComputationJob {
     public String getTowerCallbackUrl() { return towerCallbackUrl; }
 
     public List<ComputationUnit> getUnits() { return units; }
+
+    public boolean isExternalAssetUpload() { return externalAssetUpload; }
 
     public Status getStatus() { return status; }
 
