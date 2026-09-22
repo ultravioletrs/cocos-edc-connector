@@ -37,6 +37,7 @@ edc-extensions/.gradle/
 edc-extensions/.jdk/
 
 # Local runtime artifacts — generated during E2E testing, not for tracking
+docs/remote_deployment_info.md
 kbs-data/
 kbs-data
 kbs.crt
