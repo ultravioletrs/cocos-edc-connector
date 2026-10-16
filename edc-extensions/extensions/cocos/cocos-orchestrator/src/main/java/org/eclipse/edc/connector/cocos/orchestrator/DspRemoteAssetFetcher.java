@@ -69,11 +69,8 @@ public class DspRemoteAssetFetcher implements RemoteAssetFetcher {
                         .contractOffer(offer)
                         .build();
 
-                var negotiationResult = contractNegotiationService.initiateNegotiation(participantContext, contractRequest);
-                if (negotiationResult.failed()) {
-                    throw new RuntimeException("Failed to initiate contract negotiation: " + negotiationResult.getFailureDetail());
-                }
-                var negotiation = negotiationResult.getContent();
+                Object negotiationResult = contractNegotiationService.initiateNegotiation(participantContext, contractRequest);
+                var negotiation = extractNegotiation(negotiationResult);
                 String negotiationId = negotiation.getId();
 
                 // 3. Poll Contract Negotiation State
@@ -130,6 +127,32 @@ public class DspRemoteAssetFetcher implements RemoteAssetFetcher {
                 throw new RuntimeException("DSP consumer flow execution failed", e);
             }
         });
+    }
+
+    /**
+     * EDC 0.16 returns the negotiation entity directly, while later EDC
+     * versions wrap it in a ServiceResult. Keep the DSP flow source-compatible
+     * with both launcher generations without changing the runtime contract.
+     */
+    private org.eclipse.edc.connector.controlplane.contract.spi.types.negotiation.ContractNegotiation extractNegotiation(Object result) {
+        if (result instanceof org.eclipse.edc.connector.controlplane.contract.spi.types.negotiation.ContractNegotiation negotiation) {
+            return negotiation;
+        }
+        if (result == null) {
+            throw new RuntimeException("Contract negotiation service returned null");
+        }
+
+        try {
+            var failed = result.getClass().getMethod("failed").invoke(result);
+            if (Boolean.TRUE.equals(failed)) {
+                var detail = result.getClass().getMethod("getFailureDetail").invoke(result);
+                throw new RuntimeException("Failed to initiate contract negotiation: " + detail);
+            }
+            return (org.eclipse.edc.connector.controlplane.contract.spi.types.negotiation.ContractNegotiation)
+                    result.getClass().getMethod("getContent").invoke(result);
+        } catch (ReflectiveOperationException | ClassCastException e) {
+            throw new RuntimeException("Unsupported EDC contract negotiation result: " + result.getClass().getName(), e);
+        }
     }
 
     private ContractOffer findOfferForAsset(byte[] catalogBytes, String assetId) throws Exception {

@@ -57,7 +57,7 @@ class DspRemoteAssetFetcherTest {
         var negotiation = mock(ContractNegotiation.class);
         when(negotiation.getId()).thenReturn("negotiation-01");
         when(contractNegotiationService.initiateNegotiation(any(), any()))
-                .thenReturn(ServiceResult.success(negotiation));
+                .thenReturn(negotiation);
 
         when(contractNegotiationService.getState("negotiation-01")).thenReturn("FINALIZED");
 
@@ -112,7 +112,7 @@ class DspRemoteAssetFetcherTest {
         var negotiation = mock(ContractNegotiation.class);
         when(negotiation.getId()).thenReturn("negotiation-02");
         when(contractNegotiationService.initiateNegotiation(any(), any()))
-                .thenReturn(ServiceResult.success(negotiation));
+                .thenReturn(negotiation);
 
         when(contractNegotiationService.getState("negotiation-02")).thenReturn("FINALIZED");
 
@@ -165,7 +165,7 @@ class DspRemoteAssetFetcherTest {
         var negotiation = mock(ContractNegotiation.class);
         when(negotiation.getId()).thenReturn("negotiation-03");
         when(contractNegotiationService.initiateNegotiation(any(), any()))
-                .thenReturn(ServiceResult.success(negotiation));
+                .thenReturn(negotiation);
 
         when(contractNegotiationService.getState("negotiation-03")).thenReturn("FINALIZED");
 

@@ -2,7 +2,7 @@
 
 This directory contains the Gradle project packaging all Cocos-specific Eclipse Dataspace Components (EDC) extension modules.
 
-These extensions are compiled as drop-in libraries and can be added to the classpath of any upstream Eclipse EDC Connector runtime (version `v0.18.0`).
+These extensions are compiled as drop-in libraries and can be added to the classpath of the TITAN Eclipse EDC Connector runtime (version `0.16.0`).
 
 ## 📂 Layout
 

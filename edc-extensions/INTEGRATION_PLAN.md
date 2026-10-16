@@ -6,7 +6,7 @@ This document describes how to integrate the Cocos EDC extensions with an upstre
 
 ## 📐 1. Integration & Architecture Model
 
-The Cocos extensions are designed as modular, standalone `ServiceExtension` libraries. They plug into an upstream Eclipse EDC Connector runtime (at tag [**`v0.18.0`**](https://github.com/eclipse-edc/Connector/tree/v0.18.0)) by adding the compiled JARs to the connector's classpath.
+The Cocos extensions are designed as modular, standalone `ServiceExtension` libraries. They plug into the TITAN Eclipse EDC Connector runtime at [**`v0.16.0`**](https://github.com/eclipse-edc/Connector/tree/v0.16.0) by adding the compiled JARs to the connector's classpath.
 
 At startup, the Eclipse EDC Bootloader dynamically discovers these extensions via Java `ServiceLoader` manifests located in `META-INF/services/org.eclipse.edc.spi.system.ServiceExtension` inside each module's JAR.
 
