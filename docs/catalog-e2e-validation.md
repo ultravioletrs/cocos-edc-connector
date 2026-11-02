@@ -77,6 +77,12 @@ The following boundary was verified on 2026-11-02:
 
 The complete transfer was not marked successful in this runbook. Contract
 negotiation remained pending and timed out in the disposable provider setup.
+An unauthenticated direct POST to the provider negotiation route returned
+`401 Unauthorized`, while the catalog request itself returned `200`. This
+means the local provider/consumer pair needs the same participant credentials
+and token/STS configuration used by the real dataspace before it can complete
+the contract phase. Do not replace this with a forged token or disable
+authentication in a production deployment.
 Before calling this a full E2E success, repeat the same steps with the UMU
 provider endpoint and its configured participant credentials/ACS and verify
 that the result archive contains the expected output (`42` for the addition
