@@ -75,7 +75,10 @@ The contract request also carries a consumer-side DSP callback base. By
 default this is `http://127.0.0.1:<web.http.protocol.port>/api/protocol/2025-1`;
 deployments with a routable hostname should set `cocos.dsp.callback.url` to
 the corresponding externally reachable protocol base. The callback address is
-part of the DSP negotiation path and must be reachable by the provider.
+part of the DSP negotiation path and must be reachable by the provider. The
+Cocos orchestrator registers a small `POST` receiver at this base path so EDC
+callback envelopes receive an HTTP 200; the EDC DSP negotiation routes under
+`/negotiations/{id}/...` remain owned by the EDC protocol extension.
 
 For EDC 0.16, the attestation extension resolves the computation job store
 after extension graph construction. This avoids a dependency cycle through
@@ -91,15 +94,18 @@ The following boundary was verified on 2026-11-02:
 - the connector passed catalog lookup and contract initiation without the
   previous null-provider exception.
 
-The complete transfer was not marked successful in this runbook. The
-catalog-backed computation reached the provider and the CVM, but the
-disposable EDC 0.16 provider used for the local test generated a provider-side
-negotiation ID that did not match the consumer-side ID when returning the
-agreement. The consumer therefore received a 404 for the agreement callback
-and timed out. This is a provider-harness interoperability/configuration
-boundary, not evidence that the catalog request or CVM manifest path failed.
-The disposable harness also used a test-only protocol validator and token; it
-must not be used as a production authentication configuration.
+The complete transfer was not marked successful in this runbook. With the
+exact EDC 0.16 provider and the test-only identity validator, catalog discovery
+returned `200` and included `catalog-addition-016-real`. The real connected CVM
+accepted the catalog-backed manifest, but the provider attempted to send the
+agreement with negotiation ID
+`2e0b4281-3cce-48ed-9522-988946bff38c` while the consumer-side negotiation ID
+was `930dedd1-aaba-4b76-a334-90aad9a7299b`. The provider returned `404 No
+negotiation with id ... found`, and the consumer timed out. This is an EDC
+0.16 peer negotiation/correlation boundary; it is not a catalog lookup,
+connector startup, CVM connectivity, or manifest-upload failure. The
+disposable provider used a test-only protocol validator and token; it must not
+be used as a production authentication configuration.
 
 An unauthenticated direct POST to the provider negotiation route returned
 `401 Unauthorized`, while the catalog request itself returned `200`. The real
