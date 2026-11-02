@@ -8,6 +8,7 @@ import org.eclipse.edc.connector.cocos.spi.RemoteAssetFetcher;
 import org.eclipse.edc.connector.controlplane.services.spi.catalog.CatalogService;
 import org.eclipse.edc.connector.controlplane.services.spi.contractnegotiation.ContractNegotiationService;
 import org.eclipse.edc.connector.controlplane.services.spi.transferprocess.TransferProcessService;
+import org.eclipse.edc.participantcontext.single.spi.SingleParticipantContextSupplier;
 import org.eclipse.edc.http.spi.EdcHttpClient;
 import org.eclipse.edc.runtime.metamodel.annotation.Extension;
 import org.eclipse.edc.runtime.metamodel.annotation.Inject;
@@ -68,6 +69,15 @@ public class CocosOrchestratorExtension implements ServiceExtension {
         var catalogService = context.getService(CatalogService.class);
         var contractNegotiationService = context.getService(ContractNegotiationService.class);
         var transferProcessService = context.getService(TransferProcessService.class);
+        var participantContextSupplier = context.getService(SingleParticipantContextSupplier.class);
+        var participantContextResult = participantContextSupplier.get();
+        if (participantContextResult.succeeded()) {
+            context.getMonitor().info(() -> "Cocos DSP participant context id: "
+                    + participantContextResult.getContent().getParticipantContextId());
+        } else {
+            context.getMonitor().warning(() -> "Cocos DSP participant context unavailable: "
+                    + participantContextResult.getFailureDetail());
+        }
         var mapper = new ObjectMapper();
         var monitor = context.getMonitor();
         var callbackClient = new TowerCallbackClient(httpClient, mapper, monitor);
@@ -78,7 +88,7 @@ public class CocosOrchestratorExtension implements ServiceExtension {
         var callbackUrl = context.getSetting("cocos.dsp.callback.url",
                 "http://127.0.0.1:" + protocolPort + "/api/protocol/2025-1");
         var remoteAssetFetcher = new DspRemoteAssetFetcher(catalogService, contractNegotiationService,
-                transferProcessService, mapper, callbackUrl);
+                transferProcessService, mapper, callbackUrl, participantContextSupplier);
         return new ComputationOrchestratorImpl(cliService, jobStore, remoteAssetFetcher, callbackClient, executor, monitor);
     }
 }

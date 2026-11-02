@@ -12,6 +12,7 @@ import org.eclipse.edc.connector.controlplane.contract.spi.types.negotiation.Con
 import org.eclipse.edc.connector.controlplane.contract.spi.types.offer.ContractOffer;
 import org.eclipse.edc.connector.controlplane.transfer.spi.types.TransferRequest;
 import org.eclipse.edc.participantcontext.spi.types.ParticipantContext;
+import org.eclipse.edc.participantcontext.single.spi.SingleParticipantContextSupplier;
 import org.eclipse.edc.spi.query.QuerySpec;
 import org.eclipse.edc.spi.types.domain.DataAddress;
 import org.eclipse.edc.policy.model.Policy;
@@ -32,13 +33,14 @@ public class DspRemoteAssetFetcher implements RemoteAssetFetcher {
     private final TransferProcessService transferProcessService;
     private final ObjectMapper objectMapper;
     private final String callbackUrl;
+    private final SingleParticipantContextSupplier participantContextSupplier;
 
     public DspRemoteAssetFetcher(CatalogService catalogService,
                                  ContractNegotiationService contractNegotiationService,
                                  TransferProcessService transferProcessService,
                                  ObjectMapper objectMapper) {
         this(catalogService, contractNegotiationService, transferProcessService, objectMapper,
-                "http://127.0.0.1:49205/api/protocol/2025-1");
+                "http://127.0.0.1:49205/api/protocol/2025-1", null);
     }
 
     public DspRemoteAssetFetcher(CatalogService catalogService,
@@ -46,11 +48,21 @@ public class DspRemoteAssetFetcher implements RemoteAssetFetcher {
                                  TransferProcessService transferProcessService,
                                  ObjectMapper objectMapper,
                                  String callbackUrl) {
+        this(catalogService, contractNegotiationService, transferProcessService, objectMapper, callbackUrl, null);
+    }
+
+    public DspRemoteAssetFetcher(CatalogService catalogService,
+                                 ContractNegotiationService contractNegotiationService,
+                                 TransferProcessService transferProcessService,
+                                 ObjectMapper objectMapper,
+                                 String callbackUrl,
+                                 SingleParticipantContextSupplier participantContextSupplier) {
         this.catalogService = catalogService;
         this.contractNegotiationService = contractNegotiationService;
         this.transferProcessService = transferProcessService;
         this.objectMapper = objectMapper;
         this.callbackUrl = callbackUrl;
+        this.participantContextSupplier = participantContextSupplier;
     }
 
     @Override
@@ -70,10 +82,7 @@ public class DspRemoteAssetFetcher implements RemoteAssetFetcher {
             }
             try {
                 // 1. Fetch Catalog
-                var participantContext = ParticipantContext.Builder.newInstance()
-                        .participantContextId("default")
-                        .identity("default")
-                        .build();
+                var participantContext = resolveParticipantContext();
 
                 var catalogFuture = catalogService.requestCatalog(
                         participantContext,
@@ -163,6 +172,20 @@ public class DspRemoteAssetFetcher implements RemoteAssetFetcher {
                 CocosContextHolder.clear();
             }
         });
+    }
+
+    private ParticipantContext resolveParticipantContext() {
+        if (participantContextSupplier == null) {
+            return ParticipantContext.Builder.newInstance()
+                    .participantContextId("default")
+                    .identity("default")
+                    .build();
+        }
+        var result = participantContextSupplier.get();
+        if (result.failed()) {
+            throw new RuntimeException("Failed to resolve EDC participant context: " + result.getFailureDetail());
+        }
+        return result.getContent();
     }
 
     /**

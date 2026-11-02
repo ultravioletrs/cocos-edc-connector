@@ -86,26 +86,27 @@ DCP core while retaining the same management endpoint behavior.
 
 ## Validation status
 
-The following boundary was verified on 2026-11-02:
+The following boundary was verified on 2026-11-02 and 2026-11-03:
 
 - the managed connector requested the separate provider catalog successfully;
 - the catalog response contained the registered asset and offer;
 - the real connected CVM accepted the manifest and entered `UPLOADING`;
 - the connector passed catalog lookup and contract initiation without the
-  previous null-provider exception.
+  previous null-provider exception;
+- the provider reached the agreement stage and sent the agreement callback
+  through the EDC 0.16 DSP webhook path.
 
-The complete transfer was not marked successful in this runbook. With the
-exact EDC 0.16 provider and the test-only identity validator, catalog discovery
-returned `200` and included `catalog-addition-016-real`. The real connected CVM
-accepted the catalog-backed manifest, but the provider attempted to send the
-agreement with negotiation ID
-`2e0b4281-3cce-48ed-9522-988946bff38c` while the consumer-side negotiation ID
-was `930dedd1-aaba-4b76-a334-90aad9a7299b`. The provider returned `404 No
-negotiation with id ... found`, and the consumer timed out. This is an EDC
-0.16 peer negotiation/correlation boundary; it is not a catalog lookup,
-connector startup, CVM connectivity, or manifest-upload failure. The
-disposable provider used a test-only protocol validator and token; it must not
-be used as a production authentication configuration.
+The complete transfer was not marked successful in this runbook. The exact EDC
+0.16 provider returned the catalog asset and reached agreement, but the
+disposable authentication harness rejected the agreement callback while
+validating the provider identity. EDC 0.16 compares the authenticated provider
+identity with the agreement's provider negotiation ID; the temporary local
+validator does not model the UMU STS/participant credential flow sufficiently
+for that final check. This is now isolated to the disposable peer-auth harness,
+not catalog lookup, connector startup, CVM connectivity, participant-context
+selection, callback routing, or manifest upload. The disposable provider used
+test-only validators and tokens; they must not be used as production
+authentication configuration.
 
 An unauthenticated direct POST to the provider negotiation route returned
 `401 Unauthorized`, while the catalog request itself returned `200`. The real
@@ -113,6 +114,8 @@ UMU dataspace test must therefore use the participant credentials, token/STS,
 and ACS configuration supplied by UMU. Do not replace this with a forged token
 or disable authentication in a production deployment.
 Before calling this a full E2E success, repeat the same steps with the UMU
-provider endpoint and its configured participant credentials/ACS and verify
+provider endpoint and its configured participant credentials/STS/ACS and verify
 that the result archive contains the expected output (`42` for the addition
-smoke test).
+smoke test). The production integration should use UMU's real participant
+credential service rather than copying the temporary validator jars from the
+local test harness.
