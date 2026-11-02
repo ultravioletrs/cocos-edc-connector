@@ -152,6 +152,7 @@ public class DspRemoteAssetFetcher implements RemoteAssetFetcher {
                         .protocol(DSP_PROTOCOL)
                         .counterPartyAddress(providerConnectorUrl)
                         .contractId(agreementId)
+                        .transferType("HttpData-PULL")
                         .dataDestination(destination)
                         .build();
 

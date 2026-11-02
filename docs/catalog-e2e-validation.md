@@ -96,17 +96,19 @@ The following boundary was verified on 2026-11-02 and 2026-11-03:
 - the provider reached the agreement stage and sent the agreement callback
   through the EDC 0.16 DSP webhook path.
 
-The complete transfer was not marked successful in this runbook. The exact EDC
-0.16 provider returned the catalog asset and reached the agreement callback,
-but rejected the agreement because its policy had no permissions. The trace
-shows that the connector's catalog offer contained the `use` permission, while
-the EDC 0.16 peer reconstructed an empty policy before validating the
-agreement. The connector now preserves permissions when reconstructing the
-catalog `ContractOffer`, including the array-shaped `hasPolicy` form; the
-remaining failure is in the disposable EDC 0.16 peer/context harness and must
-be rechecked against UMU's actual launcher and participant context before
-claiming full E2E success. This is not a CVM startup, callback routing, or
-manifest-upload failure.
+The complete transfer was not marked successful in this runbook. After the
+permission-preservation fix, the exact EDC 0.16 provider accepted catalog
+discovery and contract negotiation. The transfer then failed because the
+disposable provider launcher had no registered dataplane capable of handling
+`HttpData-PULL` (`No dataplane found` / `TransferType HttpData-PULL is not
+supported`). The supplied UMU launcher includes a separate dataplane runtime;
+the final UMU test must run that runtime and register it with the provider
+control plane before the result archive can be validated.
+
+The connector also now sets the EDC 0.16 `HttpData-PULL` transfer type on the
+transfer request. This was required by the UMU runtime and is covered by a
+regression test. The remaining blocker is dataplane deployment/registration,
+not CVM startup, callback routing, catalog lookup, or manifest upload.
 
 The disposable provider used test-only validators and tokens; they must not be
 used as production authentication configuration.

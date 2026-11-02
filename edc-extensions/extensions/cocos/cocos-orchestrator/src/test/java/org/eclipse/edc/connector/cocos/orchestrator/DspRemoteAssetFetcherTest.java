@@ -91,6 +91,7 @@ class DspRemoteAssetFetcherTest {
 
         verify(transferProcessService, timeout(2000)).initiateTransfer(any(), requestCaptor.capture());
         var transferRequest = requestCaptor.getValue();
+        assertThat(transferRequest.getTransferType()).isEqualTo("HttpData-PULL");
         String bufferId = transferRequest.getDataDestination().getStringProperty("cocos.buffer.id");
         assertThat(bufferId).isNotNull();
 
