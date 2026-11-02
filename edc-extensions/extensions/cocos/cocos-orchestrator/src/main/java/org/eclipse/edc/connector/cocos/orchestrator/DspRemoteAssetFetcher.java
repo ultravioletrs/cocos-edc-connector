@@ -2,6 +2,7 @@ package org.eclipse.edc.connector.cocos.orchestrator;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.eclipse.edc.connector.cocos.spi.CocosContextHolder;
 import org.eclipse.edc.connector.cocos.spi.RemoteAssetFetcher;
 import org.eclipse.edc.connector.cocos.spi.InMemoryBufferRegistry;
 import org.eclipse.edc.connector.controlplane.services.spi.catalog.CatalogService;
@@ -38,7 +39,19 @@ public class DspRemoteAssetFetcher implements RemoteAssetFetcher {
 
     @Override
     public CompletableFuture<byte[]> fetch(String providerConnectorUrl, String assetUrl) {
+        // The DSP flow executes asynchronously, so explicitly capture the
+        // computation context before leaving the request thread. ThreadLocal
+        // values are otherwise invisible to the worker that requests the VP.
+        var activeVmIp = CocosContextHolder.getActiveVmIp().orElse(null);
+        var activeJobId = CocosContextHolder.getActiveJobId().orElse(null);
+
         return CompletableFuture.supplyAsync(() -> {
+            if (activeVmIp != null) {
+                CocosContextHolder.setActiveVmIp(activeVmIp);
+            }
+            if (activeJobId != null) {
+                CocosContextHolder.setActiveJobId(activeJobId);
+            }
             try {
                 // 1. Fetch Catalog
                 var participantContext = ParticipantContext.Builder.newInstance()
@@ -125,6 +138,8 @@ public class DspRemoteAssetFetcher implements RemoteAssetFetcher {
 
             } catch (Exception e) {
                 throw new RuntimeException("DSP consumer flow execution failed", e);
+            } finally {
+                CocosContextHolder.clear();
             }
         });
     }

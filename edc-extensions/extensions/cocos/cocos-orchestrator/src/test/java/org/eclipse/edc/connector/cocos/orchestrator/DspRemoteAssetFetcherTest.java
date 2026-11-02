@@ -1,6 +1,7 @@
 package org.eclipse.edc.connector.cocos.orchestrator;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.eclipse.edc.connector.cocos.spi.CocosContextHolder;
 import org.eclipse.edc.connector.cocos.spi.InMemoryBufferRegistry;
 import org.eclipse.edc.connector.controlplane.services.spi.catalog.CatalogService;
 import org.eclipse.edc.connector.controlplane.services.spi.contractnegotiation.ContractNegotiationService;
@@ -9,6 +10,7 @@ import org.eclipse.edc.connector.controlplane.contract.spi.types.negotiation.Con
 import org.eclipse.edc.connector.controlplane.contract.spi.types.agreement.ContractAgreement;
 import org.eclipse.edc.connector.controlplane.transfer.spi.types.TransferProcess;
 import org.eclipse.edc.spi.response.StatusResult;
+import org.eclipse.edc.spi.response.ResponseStatus;
 import org.eclipse.edc.spi.result.ServiceResult;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -16,6 +18,7 @@ import org.mockito.ArgumentCaptor;
 
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
@@ -212,5 +215,32 @@ class DspRemoteAssetFetcherTest {
                 .hasMessageContaining("DSP consumer flow execution failed")
                 .hasRootCauseInstanceOf(IllegalArgumentException.class)
                 .hasRootCauseMessage("Asset " + missingAssetId + " not found in catalog");
+    }
+
+    @Test
+    void fetch_propagatesCocosContextToAsyncDspWorker() throws Exception {
+        var vmIpSeenByWorker = new AtomicReference<String>();
+        var jobIdSeenByWorker = new AtomicReference<String>();
+
+        when(catalogService.requestCatalog(any(), anyString(), anyString(), any(), any()))
+                .thenAnswer(invocation -> {
+                    vmIpSeenByWorker.set(CocosContextHolder.getActiveVmIp().orElse(null));
+                    jobIdSeenByWorker.set(CocosContextHolder.getActiveJobId().orElse(null));
+                    return CompletableFuture.completedFuture(
+                            StatusResult.failure(ResponseStatus.FATAL_ERROR, "stop after context check"));
+                });
+
+        CocosContextHolder.setActiveVmIp("127.0.0.1:49209");
+        CocosContextHolder.setActiveJobId("catalog-context-test");
+        try {
+            var fetchFuture = fetcher.fetch("http://provider/dsp", "asset-01");
+
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> fetchFuture.get(2, TimeUnit.SECONDS))
+                    .hasMessageContaining("DSP consumer flow execution failed");
+            assertThat(vmIpSeenByWorker).hasValue("127.0.0.1:49209");
+            assertThat(jobIdSeenByWorker).hasValue("catalog-context-test");
+        } finally {
+            CocosContextHolder.clear();
+        }
     }
 }
