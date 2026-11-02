@@ -79,9 +79,6 @@ public class CocosAttestationExtension implements ServiceExtension {
     @Inject
     private WebService webService;
 
-    @Inject
-    private ComputationJobStore jobStore;
-
     @Override
     public String name() {
         return NAME;
@@ -89,6 +86,10 @@ public class CocosAttestationExtension implements ServiceExtension {
 
     @Override
     public void initialize(ServiceExtensionContext context) {
+        // Resolve the orchestrator store after extension graph construction.
+        // EDC 0.16 otherwise sees a cycle through DCP core -> attestation ->
+        // orchestrator -> control-plane services -> DCP core.
+        var jobStore = context.getService(ComputationJobStore.class);
         webService.registerResource("management", new TemporaryAttestationTokenController(
                 cliService, jobStore, httpClient, kbsUrl, teeType, context.getMonitor()));
     }

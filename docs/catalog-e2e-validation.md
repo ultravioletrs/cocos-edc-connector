@@ -4,6 +4,12 @@ This runbook records the catalog integration check against the EDC 0.16/DSP
 2025-1 setup used by UMU. It deliberately contains no host credentials or
 private keys.
 
+The UMU launcher must be used as the runtime base. The standalone deployment
+previously tested on the host was EDC `0.18.0`, while the supplied UMU launcher
+and its provider are EDC `0.16.0`; those versions must not be mixed. Build the
+launcher-integrated runtime with the procedure in
+[`TITAN_0.16_INTEGRATION.md`](../edc-extensions/TITAN_0.16_INTEGRATION.md).
+
 ## Verified flow
 
 1. Register an asset at the provider connector. The asset must have an HTTP
@@ -70,6 +76,10 @@ default this is `http://127.0.0.1:<web.http.protocol.port>/api/protocol/2025-1`;
 deployments with a routable hostname should set `cocos.dsp.callback.url` to
 the corresponding externally reachable protocol base. The callback address is
 part of the DSP negotiation path and must be reachable by the provider.
+
+For EDC 0.16, the attestation extension resolves the computation job store
+after extension graph construction. This avoids a dependency cycle through
+DCP core while retaining the same management endpoint behavior.
 
 ## Validation status
 
