@@ -45,6 +45,7 @@ class DspRemoteAssetFetcherTest {
         String assetId = "dataset-01";
 
         String catalogJson = "{\n" +
+                "  \"participantId\": \"did:web:provider.example\",\n" +
                 "  \"@context\": \"http://www.w3.org/ns/dcat#\",\n" +
                 "  \"dcat:dataset\": {\n" +
                 "    \"@id\": \"" + assetId + "\",\n" +
@@ -61,7 +62,6 @@ class DspRemoteAssetFetcherTest {
         when(negotiation.getId()).thenReturn("negotiation-01");
         when(contractNegotiationService.initiateNegotiation(any(), any()))
                 .thenReturn(negotiation);
-
         when(contractNegotiationService.getState("negotiation-01")).thenReturn("FINALIZED");
 
         var agreement = mock(ContractAgreement.class);
@@ -73,6 +73,11 @@ class DspRemoteAssetFetcherTest {
                 .thenReturn(ServiceResult.success(transferProcess));
 
         var fetchFuture = fetcher.fetch(providerUrl, assetId);
+
+        var contractRequestCaptor = ArgumentCaptor.forClass(org.eclipse.edc.connector.controlplane.contract.spi.types.negotiation.ContractRequest.class);
+        verify(contractNegotiationService, timeout(2000)).initiateNegotiation(any(), contractRequestCaptor.capture());
+        assertThat(contractRequestCaptor.getValue().getContractOffer().getPolicy().getAssigner())
+                .isEqualTo("did:web:provider.example");
 
         var requestCaptor = ArgumentCaptor.forClass(org.eclipse.edc.connector.controlplane.transfer.spi.types.TransferRequest.class);
 

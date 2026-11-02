@@ -199,9 +199,13 @@ public class DspRemoteAssetFetcher implements RemoteAssetFetcher {
             policyId = "offer-for-" + assetId;
         }
 
-        var policy = Policy.Builder.newInstance()
-                .target(assetId)
-                .build();
+        var policyBuilder = Policy.Builder.newInstance()
+                .target(assetId);
+        var participantId = root.path("participantId").asText(null);
+        if (participantId != null && !participantId.isBlank()) {
+            policyBuilder.assigner(participantId);
+        }
+        var policy = policyBuilder.build();
 
         return ContractOffer.Builder.newInstance()
                 .id(policyId)
