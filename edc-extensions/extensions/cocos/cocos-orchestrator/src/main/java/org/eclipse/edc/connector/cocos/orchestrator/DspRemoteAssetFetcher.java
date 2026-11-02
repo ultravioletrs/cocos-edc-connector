@@ -15,8 +15,11 @@ import org.eclipse.edc.participantcontext.spi.types.ParticipantContext;
 import org.eclipse.edc.spi.query.QuerySpec;
 import org.eclipse.edc.spi.types.domain.DataAddress;
 import org.eclipse.edc.policy.model.Policy;
+import org.eclipse.edc.spi.types.domain.callback.CallbackAddress;
 
 import java.util.UUID;
+import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
@@ -28,15 +31,26 @@ public class DspRemoteAssetFetcher implements RemoteAssetFetcher {
     private final ContractNegotiationService contractNegotiationService;
     private final TransferProcessService transferProcessService;
     private final ObjectMapper objectMapper;
+    private final String callbackUrl;
 
     public DspRemoteAssetFetcher(CatalogService catalogService,
                                  ContractNegotiationService contractNegotiationService,
                                  TransferProcessService transferProcessService,
                                  ObjectMapper objectMapper) {
+        this(catalogService, contractNegotiationService, transferProcessService, objectMapper,
+                "http://127.0.0.1:49205/api/protocol/2025-1");
+    }
+
+    public DspRemoteAssetFetcher(CatalogService catalogService,
+                                 ContractNegotiationService contractNegotiationService,
+                                 TransferProcessService transferProcessService,
+                                 ObjectMapper objectMapper,
+                                 String callbackUrl) {
         this.catalogService = catalogService;
         this.contractNegotiationService = contractNegotiationService;
         this.transferProcessService = transferProcessService;
         this.objectMapper = objectMapper;
+        this.callbackUrl = callbackUrl;
     }
 
     @Override
@@ -81,6 +95,11 @@ public class DspRemoteAssetFetcher implements RemoteAssetFetcher {
                 var contractRequest = ContractRequest.Builder.newInstance()
                         .protocol(DSP_PROTOCOL)
                         .counterPartyAddress(providerConnectorUrl)
+                        .callbackAddresses(List.of(CallbackAddress.Builder.newInstance()
+                                .uri(callbackUrl)
+                                .events(Set.of("contract.negotiation", "transfer.process"))
+                                .transactional(false)
+                                .build()))
                         .contractOffer(offer)
                         .build();
 

@@ -65,6 +65,12 @@ assigner. EDC uses that value as the provider ID when creating the contract
 request; omitting it causes a null provider ID and an immediate negotiation
 failure.
 
+The contract request also carries a consumer-side DSP callback base. By
+default this is `http://127.0.0.1:<web.http.protocol.port>/api/protocol/2025-1`;
+deployments with a routable hostname should set `cocos.dsp.callback.url` to
+the corresponding externally reachable protocol base. The callback address is
+part of the DSP negotiation path and must be reachable by the provider.
+
 ## Validation status
 
 The following boundary was verified on 2026-11-02:
@@ -75,14 +81,21 @@ The following boundary was verified on 2026-11-02:
 - the connector passed catalog lookup and contract initiation without the
   previous null-provider exception.
 
-The complete transfer was not marked successful in this runbook. Contract
-negotiation remained pending and timed out in the disposable provider setup.
+The complete transfer was not marked successful in this runbook. The
+catalog-backed computation reached the provider and the CVM, but the
+disposable EDC 0.16 provider used for the local test generated a provider-side
+negotiation ID that did not match the consumer-side ID when returning the
+agreement. The consumer therefore received a 404 for the agreement callback
+and timed out. This is a provider-harness interoperability/configuration
+boundary, not evidence that the catalog request or CVM manifest path failed.
+The disposable harness also used a test-only protocol validator and token; it
+must not be used as a production authentication configuration.
+
 An unauthenticated direct POST to the provider negotiation route returned
-`401 Unauthorized`, while the catalog request itself returned `200`. This
-means the local provider/consumer pair needs the same participant credentials
-and token/STS configuration used by the real dataspace before it can complete
-the contract phase. Do not replace this with a forged token or disable
-authentication in a production deployment.
+`401 Unauthorized`, while the catalog request itself returned `200`. The real
+UMU dataspace test must therefore use the participant credentials, token/STS,
+and ACS configuration supplied by UMU. Do not replace this with a forged token
+or disable authentication in a production deployment.
 Before calling this a full E2E success, repeat the same steps with the UMU
 provider endpoint and its configured participant credentials/ACS and verify
 that the result archive contains the expected output (`42` for the addition

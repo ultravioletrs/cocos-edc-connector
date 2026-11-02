@@ -79,7 +79,11 @@ public class CocosOrchestratorExtension implements ServiceExtension {
         var monitor = context.getMonitor();
         var callbackClient = new TowerCallbackClient(httpClient, mapper, monitor);
         var executor = Executors.newCachedThreadPool();
-        var remoteAssetFetcher = new DspRemoteAssetFetcher(catalogService, contractNegotiationService, transferProcessService, mapper);
+        var protocolPort = context.getSetting("web.http.protocol.port", 49205);
+        var callbackUrl = context.getSetting("cocos.dsp.callback.url",
+                "http://127.0.0.1:" + protocolPort + "/api/protocol/2025-1");
+        var remoteAssetFetcher = new DspRemoteAssetFetcher(catalogService, contractNegotiationService,
+                transferProcessService, mapper, callbackUrl);
         return new ComputationOrchestratorImpl(cliService, jobStore, remoteAssetFetcher, callbackClient, executor, monitor);
     }
 }

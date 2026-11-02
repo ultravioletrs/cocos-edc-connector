@@ -78,6 +78,9 @@ class DspRemoteAssetFetcherTest {
         verify(contractNegotiationService, timeout(2000)).initiateNegotiation(any(), contractRequestCaptor.capture());
         assertThat(contractRequestCaptor.getValue().getContractOffer().getPolicy().getAssigner())
                 .isEqualTo("did:web:provider.example");
+        assertThat(contractRequestCaptor.getValue().getCallbackAddresses()).singleElement()
+                .extracting(address -> address.getUri())
+                .isEqualTo("http://127.0.0.1:49205/api/protocol/2025-1");
 
         var requestCaptor = ArgumentCaptor.forClass(org.eclipse.edc.connector.controlplane.transfer.spi.types.TransferRequest.class);
 
