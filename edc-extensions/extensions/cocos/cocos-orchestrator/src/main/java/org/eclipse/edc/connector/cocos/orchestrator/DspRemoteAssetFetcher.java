@@ -13,9 +13,11 @@ import org.eclipse.edc.connector.controlplane.contract.spi.types.offer.ContractO
 import org.eclipse.edc.connector.controlplane.transfer.spi.types.TransferRequest;
 import org.eclipse.edc.participantcontext.spi.types.ParticipantContext;
 import org.eclipse.edc.participantcontext.single.spi.SingleParticipantContextSupplier;
+import org.eclipse.edc.policy.model.Action;
+import org.eclipse.edc.policy.model.Permission;
+import org.eclipse.edc.policy.model.Policy;
 import org.eclipse.edc.spi.query.QuerySpec;
 import org.eclipse.edc.spi.types.domain.DataAddress;
-import org.eclipse.edc.policy.model.Policy;
 import org.eclipse.edc.spi.types.domain.callback.CallbackAddress;
 
 import java.util.UUID;
@@ -229,11 +231,13 @@ public class DspRemoteAssetFetcher implements RemoteAssetFetcher {
             throw new IllegalArgumentException("Asset " + assetId + " has no policy offer in catalog");
         }
 
+        var offerPolicyNode = policyNode;
         String policyId = null;
         if (policyNode.isObject()) {
             policyId = policyNode.has("@id") ? policyNode.get("@id").asText() : (policyNode.has("id") ? policyNode.get("id").asText() : null);
         } else if (policyNode.isArray() && !policyNode.isEmpty()) {
             var firstPolicy = policyNode.get(0);
+            offerPolicyNode = firstPolicy;
             policyId = firstPolicy.has("@id") ? firstPolicy.get("@id").asText() : (firstPolicy.has("id") ? firstPolicy.get("id").asText() : null);
         }
 
@@ -242,7 +246,8 @@ public class DspRemoteAssetFetcher implements RemoteAssetFetcher {
         }
 
         var policyBuilder = Policy.Builder.newInstance()
-                .target(assetId);
+                .target(assetId)
+                .permissions(readPermissions(offerPolicyNode));
         var participantId = root.path("participantId").asText(null);
         if (participantId != null && !participantId.isBlank()) {
             policyBuilder.assigner(participantId);
@@ -254,6 +259,38 @@ public class DspRemoteAssetFetcher implements RemoteAssetFetcher {
                 .assetId(assetId)
                 .policy(policy)
                 .build();
+    }
+
+    private List<Permission> readPermissions(JsonNode policyNode) {
+        var permissions = policyNode.get("odrl:permission");
+        if (permissions == null) {
+            permissions = policyNode.get("permission");
+        }
+        if (permissions == null) {
+            return List.of();
+        }
+
+        var permissionNodes = permissions.isArray() ? permissions : List.of(permissions);
+        var result = new java.util.ArrayList<Permission>();
+        for (var permissionNode : permissionNodes) {
+            var actionNode = permissionNode.get("odrl:action");
+            if (actionNode == null) {
+                actionNode = permissionNode.get("action");
+            }
+            if (actionNode == null) {
+                continue;
+            }
+
+            var actionType = actionNode.isTextual()
+                    ? actionNode.asText()
+                    : actionNode.path("@id").asText(actionNode.path("id").asText(actionNode.path("type").asText(null)));
+            if (actionType != null && !actionType.isBlank()) {
+                result.add(Permission.Builder.newInstance()
+                        .action(Action.Builder.newInstance().type(actionType).build())
+                        .build());
+            }
+        }
+        return result;
     }
 
     private JsonNode findDataset(JsonNode root, String assetId) {

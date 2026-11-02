@@ -97,16 +97,19 @@ The following boundary was verified on 2026-11-02 and 2026-11-03:
   through the EDC 0.16 DSP webhook path.
 
 The complete transfer was not marked successful in this runbook. The exact EDC
-0.16 provider returned the catalog asset and reached agreement, but the
-disposable authentication harness rejected the agreement callback while
-validating the provider identity. EDC 0.16 compares the authenticated provider
-identity with the agreement's provider negotiation ID; the temporary local
-validator does not model the UMU STS/participant credential flow sufficiently
-for that final check. This is now isolated to the disposable peer-auth harness,
-not catalog lookup, connector startup, CVM connectivity, participant-context
-selection, callback routing, or manifest upload. The disposable provider used
-test-only validators and tokens; they must not be used as production
-authentication configuration.
+0.16 provider returned the catalog asset and reached the agreement callback,
+but rejected the agreement because its policy had no permissions. The trace
+shows that the connector's catalog offer contained the `use` permission, while
+the EDC 0.16 peer reconstructed an empty policy before validating the
+agreement. The connector now preserves permissions when reconstructing the
+catalog `ContractOffer`, including the array-shaped `hasPolicy` form; the
+remaining failure is in the disposable EDC 0.16 peer/context harness and must
+be rechecked against UMU's actual launcher and participant context before
+claiming full E2E success. This is not a CVM startup, callback routing, or
+manifest-upload failure.
+
+The disposable provider used test-only validators and tokens; they must not be
+used as production authentication configuration.
 
 An unauthenticated direct POST to the provider negotiation route returned
 `401 Unauthorized`, while the catalog request itself returned `200`. The real
