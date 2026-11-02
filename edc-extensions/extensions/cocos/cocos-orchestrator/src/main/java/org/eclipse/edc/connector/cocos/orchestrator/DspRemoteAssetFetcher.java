@@ -22,6 +22,8 @@ import java.util.concurrent.TimeUnit;
 
 public class DspRemoteAssetFetcher implements RemoteAssetFetcher {
 
+    private static final String DSP_PROTOCOL = "dataspace-protocol-http:2025-1";
+
     private final CatalogService catalogService;
     private final ContractNegotiationService contractNegotiationService;
     private final TransferProcessService transferProcessService;
@@ -62,8 +64,8 @@ public class DspRemoteAssetFetcher implements RemoteAssetFetcher {
                 var catalogFuture = catalogService.requestCatalog(
                         participantContext,
                         providerConnectorUrl,
-                        "dataspace-protocol-http",
-                        null,
+                        providerConnectorUrl,
+                        DSP_PROTOCOL,
                         QuerySpec.max()
                 );
 
@@ -77,7 +79,7 @@ public class DspRemoteAssetFetcher implements RemoteAssetFetcher {
 
                 // 2. Initiate Contract Negotiation
                 var contractRequest = ContractRequest.Builder.newInstance()
-                        .protocol("dataspace-protocol-http")
+                        .protocol(DSP_PROTOCOL)
                         .counterPartyAddress(providerConnectorUrl)
                         .contractOffer(offer)
                         .build();
@@ -117,7 +119,7 @@ public class DspRemoteAssetFetcher implements RemoteAssetFetcher {
                         .build();
 
                 var transferRequest = TransferRequest.Builder.newInstance()
-                        .protocol("dataspace-protocol-http")
+                        .protocol(DSP_PROTOCOL)
                         .counterPartyAddress(providerConnectorUrl)
                         .contractId(agreementId)
                         .dataDestination(destination)

@@ -85,6 +85,8 @@ class DspRemoteAssetFetcherTest {
 
         var resultBytes = fetchFuture.get(2, TimeUnit.SECONDS);
         assertThat(new String(resultBytes)).isEqualTo("asset-data-bytes");
+        verify(catalogService).requestCatalog(any(), eq(providerUrl), eq(providerUrl),
+                eq("dataspace-protocol-http:2025-1"), any());
     }
 
     @Test
