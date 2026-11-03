@@ -123,6 +123,23 @@ request. The host validation command passed all eight `cocos-orchestrator`
 tests and built the UMU-compatible
 `cocos-orchestrator-0.16.0-titan.jar`.
 
+### Self-hosted catalog check
+
+To test without waiting for UMU's live participant, a disposable EDC 0.16
+provider and UMU dataplane were started on the TDX host. The provider exposed
+the asset `catalog-local-addition-final-20261103`, and the consumer retrieved
+it through the catalog at HTTP 200. The catalog response included the asset's
+`HttpData-PULL` distribution and `provider-local` participant ID. The provider
+dataplane self-registered at `/api/control/v1/dataplanes`, created the signed
+EDR, and the connector reached `cocos-cli algo` for the real CVM.
+
+The CVM did not produce a result archive: its agent remained in
+`ReceivingAlgorithm` until the 60-second upload timeout. This confirms the
+catalog, DSP, transfer, EDR, and connector-to-agent path independently of
+UMU's catalog, but it is not a successful computation result. The disposable
+provider, dataplane, proxies, and fixture server were stopped after the test;
+the shared connector was restored on ports `49203-49207`.
+
 The disposable provider used test-only validators and tokens; they must not be
 used as production authentication configuration.
 
