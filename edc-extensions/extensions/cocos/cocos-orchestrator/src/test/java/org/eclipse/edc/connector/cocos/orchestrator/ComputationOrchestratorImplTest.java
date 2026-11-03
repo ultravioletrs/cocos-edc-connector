@@ -12,9 +12,11 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
@@ -124,5 +126,54 @@ class ComputationOrchestratorImplTest {
         verify(cliService, never()).uploadAlgorithm(anyString(), anyString(), anyString(), any());
         verify(cliService, never()).uploadDataset(anyString(), anyString(), any());
         verify(cliService).fetchResult(eq(vmIp));
+    }
+
+    @Test
+    void remoteAssetsAreHashedBeforeManifestIsSent() throws Exception {
+        String jobId = "catalog-job";
+        String vmIp = "127.0.0.1:49234";
+        byte[] assetBytes = "catalog-asset".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        var source = AssetSource.newInstance()
+                .type(AssetSource.Type.URL)
+                .url("catalog-asset-id")
+                .build();
+        var manifest = ComputeManifest.newInstance()
+                .algorithm(AlgorithmSpec.newInstance()
+                        .filename("algo.py")
+                        .type("python")
+                        .source(source)
+                        .providerConnectorUrl("http://provider/api/protocol/2025-1")
+                        .build())
+                .build();
+        var request = ComputationRequest.newInstance()
+                .jobId(jobId)
+                .units(List.of(ComputationUnit.newInstance().vmIp(vmIp).manifest(manifest).build()))
+                .build();
+
+        var sentManifest = new AtomicReference<ComputeManifest>();
+        when(remoteAssetFetcher.fetch("http://provider/api/protocol/2025-1", "catalog-asset-id"))
+                .thenReturn(CompletableFuture.completedFuture(assetBytes));
+        when(cliService.startAgent(eq(vmIp), any())).thenAnswer(invocation -> {
+            sentManifest.set(invocation.getArgument(1));
+            return Result.success();
+        });
+        when(cliService.uploadAlgorithm(eq(vmIp), eq("algo.py"), eq("python"), same(assetBytes)))
+                .thenReturn(Result.success());
+        when(cliService.fetchResult(eq(vmIp))).thenReturn(Result.success("result-bytes".getBytes()));
+
+        var scheduler = Executors.newSingleThreadScheduledExecutor();
+        scheduler.schedule(() -> {
+            CocosAgentReadyRegistry.complete(jobId);
+            CocosAgentCompletionRegistry.complete(jobId);
+            scheduler.shutdown();
+        }, 100, TimeUnit.MILLISECONDS);
+
+        assertThat(orchestrator.start(request)).isEqualTo(jobId);
+        verify(callbackClient, timeout(2000)).reportSuccess(any(ComputationJob.class));
+        assertThat(sentManifest.get().getAlgorithm().getHash())
+                .isEqualTo(java.util.HexFormat.of().formatHex(
+                        java.security.MessageDigest.getInstance("SHA3-256").digest(assetBytes)));
+        verify(remoteAssetFetcher).fetch("http://provider/api/protocol/2025-1", "catalog-asset-id");
+        verify(cliService).uploadAlgorithm(eq(vmIp), eq("algo.py"), eq("python"), same(assetBytes));
     }
 }

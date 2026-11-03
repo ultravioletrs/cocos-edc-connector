@@ -118,6 +118,26 @@ class CocosCliServiceImplTest {
         Files.deleteIfExists(cliScript);
     }
 
+    @Test
+    void uploadAlgorithm_zeroExitWithCliErrorOnStderrFails() throws IOException {
+        Path cliScript = Files.createTempFile("cocos-cli-stderr", ".sh");
+        Files.writeString(cliScript, String.join("\n", List.of(
+                "#!/bin/sh",
+                "printf '%s\\n' 'Failed to upload algorithm due to error: signature verification failed' >&2",
+                "exit 0"
+        )));
+        assertThat(cliScript.toFile().setExecutable(true)).isTrue();
+
+        CocosCliService service = new CocosCliServiceImpl(cliScript.toAbsolutePath().toString(), tempKeyFile.toAbsolutePath().toString(), monitor);
+
+        var result = service.uploadAlgorithm(agentAddress(), "addition.py", "python", "print(20 + 22)".getBytes());
+
+        assertThat(result.failed()).isTrue();
+        assertThat(result.getFailureDetail()).contains("signature verification failed");
+
+        Files.deleteIfExists(cliScript);
+    }
+
     private String agentAddress() {
         return "127.0.0.1:" + agentSocket.getLocalPort();
     }

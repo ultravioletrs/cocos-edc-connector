@@ -102,21 +102,23 @@ The following boundary was verified on 2026-11-02 and 2026-11-03:
 - the connector fetched the algorithm bytes from that EDR and reached the
   real CVM's algorithm-upload phase.
 
-The final algorithm result was not marked successful. The UMU 0.16 launcher
-used for this validation is a control-plane-only consumer and has no embedded
-consumer dataplane. The connector therefore consumes the provider's ready EDR
-directly, including its authorization property, instead of waiting forever for
-an in-memory sink that is not present. This is the expected behavior for this
-launcher layout and is covered by the connector build and integration run.
+The UMU 0.16 launcher used for this validation is a control-plane-only
+consumer and has no embedded consumer dataplane. The connector therefore
+consumes the provider's ready EDR directly, including its authorization
+property, instead of waiting for an in-memory sink that is not present.
 
-The remaining failure occurred inside the test CVM: after the connector
-started `cocos-cli algo`, the guest agent stayed in `ReceivingAlgorithm` until
-the 60-second CLI timeout. No result archive was produced, so the expected
-`42` output has not been claimed. The catalog lookup, DSP negotiation,
-contract agreement, provider transfer, EDR retrieval, and manifest handoff
-were successful before that guest-side timeout. Capture `/var/log/cocos/*`
-from the guest and the connector log around the timeout before changing the
-UMU launcher or dataspace configuration.
+Two connector-side execution bugs were found and fixed:
+
+1. A catalog URL asset was fetched only after the manifest was dispatched, so
+   the guest received an empty hash before the connector uploaded the real
+   bytes. Remote assets are now resolved before manifest registration, their
+   SHA3-256 hash is populated, and the same bytes are reused for upload.
+2. `cocos-cli` reports some failures on stderr while exiting with code zero.
+   The connector now evaluates stdout and stderr together and fails the job
+   promptly instead of leaving it in `ReceivingAlgorithm`.
+
+The connector also clears stale manifest/dispatch state when a job ID is
+reused. This keeps a reconnecting CVM idle until the new lifecycle is ready.
 
 The connector sets the EDC 0.16 `HttpData-PULL` transfer type on the transfer
 request. The host validation command passed all eight `cocos-orchestrator`
@@ -133,12 +135,17 @@ it through the catalog at HTTP 200. The catalog response included the asset's
 dataplane self-registered at `/api/control/v1/dataplanes`, created the signed
 EDR, and the connector reached `cocos-cli algo` for the real CVM.
 
-The CVM did not produce a result archive: its agent remained in
-`ReceivingAlgorithm` until the 60-second upload timeout. This confirms the
-catalog, DSP, transfer, EDR, and connector-to-agent path independently of
-UMU's catalog, but it is not a successful computation result. The disposable
-provider, dataplane, proxies, and fixture server were stopped after the test;
-the shared connector was restored on ports `49203-49207`.
+After deploying the tested 0.16 jars and rebooting the CVM into a clean agent
+state, the catalog-backed addition completed successfully on 2026-11-03:
+
+- job/CVM/manifest ID: `sami-uef-desat-20261009`;
+- catalog asset: `catalog-e2e-final`;
+- agent state: `Complete`;
+- guest log: `Addition complete: 20 + 22 = 42`.
+
+The disposable provider, dataplane, proxies, and fixture server were used only
+for this local validation. The test CVM and the UMU-compatible connector were
+left running for further joint testing.
 
 The disposable provider used test-only validators and tokens; they must not be
 used as production authentication configuration.
@@ -148,10 +155,8 @@ An unauthenticated direct POST to the provider negotiation route returned
 UMU dataspace test must therefore use the participant credentials, token/STS,
 and ACS configuration supplied by UMU. Do not replace this with a forged token
 or disable authentication in a production deployment.
-Before calling this a full E2E success, repeat the same steps with the UMU
-provider endpoint and its configured participant credentials/STS/ACS, ensure
-the provider creates a valid transfer token for the dataplane, restart the CVM
-with a clean agent state, and verify that the result archive contains the
-expected output (`42` for the addition smoke test). The production integration
-should use UMU's real participant credential service rather than copying the
-temporary validator jars from the local test harness.
+The local flow is complete up to the UMU boundary. The remaining joint test
+requires UMU's real provider catalog URL, participant identity/credentials,
+STS or token configuration, dataplane endpoint/policies, and ACS endpoint. The
+production integration should use UMU's participant credential service rather
+than the temporary validators from this local harness.

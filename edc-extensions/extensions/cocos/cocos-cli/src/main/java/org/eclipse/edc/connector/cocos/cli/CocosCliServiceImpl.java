@@ -269,7 +269,9 @@ public class CocosCliServiceImpl implements CocosCliService {
             }
 
             int exitCode = process.exitValue();
-            String combinedOutput = stdout.toString().trim();
+            String stdoutOutput = stdout.toString().trim();
+            String stderrOutput = stderr.toString().trim();
+            String combinedOutput = (stdoutOutput + "\n" + stderrOutput).trim();
             if (combinedOutput.length() > 0) {
                 monitor.info("Cocos CLI output:\n" + combinedOutput);
             }
@@ -279,7 +281,7 @@ public class CocosCliServiceImpl implements CocosCliService {
             boolean hasUnavailableAgent = combinedOutput.toLowerCase().contains("agent service is unavailable");
 
             if (exitCode != 0 || hasFailureIcon || hasFailedMessage || hasUnavailableAgent) {
-                String errorMsg = stderr.toString().trim();
+                String errorMsg = stderrOutput;
                 if (errorMsg.isEmpty()) {
                     errorMsg = combinedOutput;
                 }
