@@ -8,6 +8,7 @@ import org.eclipse.edc.connector.cocos.spi.RemoteAssetFetcher;
 import org.eclipse.edc.connector.controlplane.services.spi.catalog.CatalogService;
 import org.eclipse.edc.connector.controlplane.services.spi.contractnegotiation.ContractNegotiationService;
 import org.eclipse.edc.connector.controlplane.services.spi.transferprocess.TransferProcessService;
+import org.eclipse.edc.participantcontext.single.spi.SingleParticipantContextSupplier;
 import org.eclipse.edc.http.spi.EdcHttpClient;
 import org.eclipse.edc.runtime.metamodel.annotation.Extension;
 import org.eclipse.edc.runtime.metamodel.annotation.Inject;
@@ -21,21 +22,6 @@ import java.util.concurrent.Executors;
 public class CocosOrchestratorExtension implements ServiceExtension {
 
     public static final String NAME = "CocosAI Orchestrator";
-
-    @Inject
-    private CocosCliService cliService;
-
-    @Inject
-    private EdcHttpClient httpClient;
-
-    @Inject
-    private CatalogService catalogService;
-
-    @Inject
-    private ContractNegotiationService contractNegotiationService;
-
-    @Inject
-    private TransferProcessService transferProcessService;
 
     private InMemoryComputationJobStore jobStore;
     private CvmsGrpcServer cvmsServer;
@@ -75,11 +61,34 @@ public class CocosOrchestratorExtension implements ServiceExtension {
 
     @Provider
     public ComputationOrchestrator computationOrchestrator(ServiceExtensionContext context) {
+        // Resolve services after EDC 0.16 has built its extension graph. The
+        // eager field injections create a cycle through DCP core when the
+        // attestation presentation service is enabled.
+        var cliService = context.getService(CocosCliService.class);
+        var httpClient = context.getService(EdcHttpClient.class);
+        var catalogService = context.getService(CatalogService.class);
+        var contractNegotiationService = context.getService(ContractNegotiationService.class);
+        var transferProcessService = context.getService(TransferProcessService.class);
+        var participantContextSupplier = context.getService(SingleParticipantContextSupplier.class);
+        var participantContextResult = participantContextSupplier.get();
+        if (participantContextResult.succeeded()) {
+            context.getMonitor().info(() -> "Cocos DSP participant context id: "
+                    + participantContextResult.getContent().getParticipantContextId());
+        } else {
+            context.getMonitor().warning(() -> "Cocos DSP participant context unavailable: "
+                    + participantContextResult.getFailureDetail());
+        }
         var mapper = new ObjectMapper();
         var monitor = context.getMonitor();
         var callbackClient = new TowerCallbackClient(httpClient, mapper, monitor);
         var executor = Executors.newCachedThreadPool();
-        var remoteAssetFetcher = new DspRemoteAssetFetcher(catalogService, contractNegotiationService, transferProcessService, mapper);
+        var webService = context.getService(org.eclipse.edc.web.spi.WebService.class);
+        webService.registerResource("protocol", new CocosDspCallbackController());
+        var protocolPort = context.getSetting("web.http.protocol.port", 49205);
+        var callbackUrl = context.getSetting("cocos.dsp.callback.url",
+                "http://127.0.0.1:" + protocolPort + "/api/protocol/2025-1");
+        var remoteAssetFetcher = new DspRemoteAssetFetcher(catalogService, contractNegotiationService,
+                transferProcessService, mapper, callbackUrl, participantContextSupplier);
         return new ComputationOrchestratorImpl(cliService, jobStore, remoteAssetFetcher, callbackClient, executor, monitor);
     }
 }

@@ -79,9 +79,6 @@ public class CocosAttestationExtension implements ServiceExtension {
     @Inject
     private WebService webService;
 
-    @Inject
-    private ComputationJobStore jobStore;
-
     @Override
     public String name() {
         return NAME;
@@ -89,12 +86,15 @@ public class CocosAttestationExtension implements ServiceExtension {
 
     @Override
     public void initialize(ServiceExtensionContext context) {
-        webService.registerResource("management", new TemporaryAttestationTokenController(
-                cliService, jobStore, httpClient, kbsUrl, teeType, context.getMonitor()));
+        // EDC 0.16 exposes WebService after extension initialization. The
+        // temporary management resource is registered when the presentation
+        // service provider is materialized below.
     }
 
     @Provider
     public PresentationRequestService presentationRequestService(ServiceExtensionContext context) {
+        webService.registerResource("management",
+                new TemporaryAttestationTokenController(context, httpClient, kbsUrl, teeType, context.getMonitor()));
         String serviceUrl = attestationCredentialServiceUrl;
         if (serviceUrl == null || serviceUrl.isBlank()) {
             serviceUrl = identityHubUrl;

@@ -10,7 +10,10 @@ dependencies {
     implementation(libs.edc.core.spi)
     implementation(libs.edc.control.plane.spi)
     implementation(libs.edc.http.spi)
+    implementation(libs.edc.web.spi)
+    implementation(libs.edc.spi.participant.context.single)
     implementation(libs.jackson.databind)
+    implementation(libs.jakarta.rsApi)
 
     implementation(libs.grpc.netty.shaded)
     implementation(libs.grpc.protobuf)

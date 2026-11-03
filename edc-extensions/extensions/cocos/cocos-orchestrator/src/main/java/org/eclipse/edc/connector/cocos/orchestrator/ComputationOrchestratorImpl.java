@@ -13,8 +13,11 @@ import org.eclipse.edc.spi.monitor.Monitor;
 import org.eclipse.edc.spi.result.Result;
 import org.eclipse.edc.connector.cocos.spi.CocosAgentCompletionRegistry;
 import org.eclipse.edc.connector.cocos.spi.CocosAgentReadyRegistry;
+import org.eclipse.edc.connector.cocos.spi.CocosManifestRegistry;
 
 import java.util.Optional;
+import java.util.IdentityHashMap;
+import java.util.Map;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 
@@ -44,6 +47,10 @@ public class ComputationOrchestratorImpl implements ComputationOrchestrator {
 
     @Override
     public String start(ComputationRequest request) {
+        // A reused job/CVM identity starts a new lifecycle. Clear any stale
+        // manifest before the asynchronous preparation phase so a reconnecting
+        // agent remains idle until this run is ready to dispatch.
+        CocosManifestRegistry.remove(request.getJobId());
         var job = new ComputationJob(request.getJobId(), request.getTowerCallbackUrl(), request.getUnits(),
                 request.isExternalAssetUpload());
         jobStore.save(job);
@@ -61,6 +68,13 @@ public class ComputationOrchestratorImpl implements ComputationOrchestrator {
             // Pre-create the completion future to prevent race conditions where agent completes before future is created
             CocosAgentCompletionRegistry.getOrCreate(job.getJobId());
             var readyFuture = CocosAgentReadyRegistry.getOrCreate(job.getJobId());
+            var preparedRemoteAssets = new IdentityHashMap<AssetSource, byte[]>();
+
+            // Remote assets must be resolved before the manifest is sent. The guest
+            // verifies each upload against the hash in that manifest.
+            if (!job.isExternalAssetUpload()) {
+                prepareRemoteAssets(job, preparedRemoteAssets);
+            }
 
             startAgents(job);
 
@@ -71,7 +85,7 @@ public class ComputationOrchestratorImpl implements ComputationOrchestrator {
                 monitor.info("External asset upload enabled for Job " + job.getJobId()
                         + "; waiting for the caller to upload assets with cocos-cli");
             } else {
-                uploadAssets(job);
+                uploadAssets(job, preparedRemoteAssets);
             }
 
             // Wait indefinitely for agent to report run complete via CVMS gRPC server event
@@ -193,19 +207,62 @@ public class ComputationOrchestratorImpl implements ComputationOrchestrator {
         }
     }
 
-    private void uploadAssets(ComputationJob job) {
-        job.setStatus(ComputationJob.Status.UPLOADING);
+    private void prepareRemoteAssets(ComputationJob job, Map<AssetSource, byte[]> preparedAssets) {
         for (var unit : job.getUnits()) {
-            uploadUnitAssets(job.getJobId(), unit);
+            var manifest = unit.getManifest();
+            if (manifest.getAlgorithm() != null) {
+                prepareRemoteAsset(unit, job.getJobId(), manifest.getAlgorithm().getSource(),
+                        manifest.getAlgorithm().getProviderConnectorUrl(),
+                        manifest.getAlgorithm().getHash(), preparedAssets,
+                        hash -> manifest.getAlgorithm().setHash(hash));
+            }
+            for (var dataset : manifest.getDatasets()) {
+                prepareRemoteAsset(unit, job.getJobId(), dataset.getSource(),
+                        dataset.getProviderConnectorUrl(), dataset.getHash(), preparedAssets,
+                        dataset::setHash);
+            }
         }
     }
 
-    private void uploadUnitAssets(String jobId, ComputationUnit unit) {
+    private void prepareRemoteAsset(ComputationUnit unit, String jobId, AssetSource source,
+                                    String providerConnectorUrl, String configuredHash,
+                                    Map<AssetSource, byte[]> preparedAssets,
+                                    java.util.function.Consumer<String> hashConsumer) {
+        if (source == null || source.getType() != AssetSource.Type.URL) {
+            return;
+        }
+
+        byte[] data = resolveAsset(unit.getAgentAddress(), jobId, source, providerConnectorUrl);
+        preparedAssets.put(source, data);
+        if (configuredHash == null || configuredHash.isBlank()) {
+            try {
+                var digest = java.security.MessageDigest.getInstance("SHA3-256").digest(data);
+                var hash = java.util.HexFormat.of().formatHex(digest);
+                hashConsumer.accept(hash);
+                monitor.info("Prepared remote asset for Job " + jobId + ": "
+                        + data.length + " bytes, SHA3-256=" + hash);
+            } catch (java.security.NoSuchAlgorithmException e) {
+                throw new IllegalStateException("SHA3-256 is unavailable", e);
+            }
+        }
+    }
+
+    private void uploadAssets(ComputationJob job, Map<AssetSource, byte[]> preparedAssets) {
+        job.setStatus(ComputationJob.Status.UPLOADING);
+        for (var unit : job.getUnits()) {
+            uploadUnitAssets(job.getJobId(), unit, preparedAssets);
+        }
+    }
+
+    private void uploadUnitAssets(String jobId, ComputationUnit unit, Map<AssetSource, byte[]> preparedAssets) {
         var manifest = unit.getManifest();
 
         var algo = manifest.getAlgorithm();
         if (algo != null) {
-            byte[] data = resolveAsset(unit.getAgentAddress(), jobId, algo.getSource(), algo.getProviderConnectorUrl());
+            byte[] data = preparedAssets.get(algo.getSource());
+            if (data == null) {
+                data = resolveAsset(unit.getAgentAddress(), jobId, algo.getSource(), algo.getProviderConnectorUrl());
+            }
             var result = cliService.uploadAlgorithm(unit.getAgentAddress(), algo.getFilename(), algo.getType(), data);
             if (result.failed()) {
                 throw new RuntimeException("Failed to upload algorithm " + algo.getFilename()
@@ -214,7 +271,10 @@ public class ComputationOrchestratorImpl implements ComputationOrchestrator {
         }
 
         for (var dataset : manifest.getDatasets()) {
-            byte[] data = resolveAsset(unit.getAgentAddress(), jobId, dataset.getSource(), dataset.getProviderConnectorUrl());
+            byte[] data = preparedAssets.get(dataset.getSource());
+            if (data == null) {
+                data = resolveAsset(unit.getAgentAddress(), jobId, dataset.getSource(), dataset.getProviderConnectorUrl());
+            }
             var result = cliService.uploadDataset(unit.getAgentAddress(), dataset.getFilename(), data);
             if (result.failed()) {
                 throw new RuntimeException("Failed to upload dataset " + dataset.getFilename()
@@ -222,8 +282,6 @@ public class ComputationOrchestratorImpl implements ComputationOrchestrator {
             }
         }
     }
-
-
 
     private byte[] resolveAsset(String agentAddress, String jobId, AssetSource source, String providerConnectorUrl) {
         if (source.getType() == AssetSource.Type.FILE) {

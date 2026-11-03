@@ -11,6 +11,7 @@ import org.eclipse.edc.connector.cocos.spi.CocosCliService;
 import org.eclipse.edc.connector.cocos.spi.ComputationJobStore;
 import org.eclipse.edc.http.spi.EdcHttpClient;
 import org.eclipse.edc.spi.monitor.Monitor;
+import org.eclipse.edc.spi.system.ServiceExtensionContext;
 
 import java.util.Map;
 
@@ -25,6 +26,7 @@ public class TemporaryAttestationTokenController {
 
     private final CocosCliService cliService;
     private final ComputationJobStore jobStore;
+    private final ServiceExtensionContext context;
     private final KbsClient kbsClient;
     private final String teeType;
     private final Monitor monitor;
@@ -37,6 +39,20 @@ public class TemporaryAttestationTokenController {
                                                Monitor monitor) {
         this.cliService = cliService;
         this.jobStore = jobStore;
+        this.context = null;
+        this.kbsClient = new KbsClientImpl(httpClient, new ObjectMapper(), kbsUrl);
+        this.teeType = teeType;
+        this.monitor = monitor;
+    }
+
+    public TemporaryAttestationTokenController(ServiceExtensionContext context,
+                                               EdcHttpClient httpClient,
+                                               String kbsUrl,
+                                               String teeType,
+                                               Monitor monitor) {
+        this.cliService = null;
+        this.jobStore = null;
+        this.context = context;
         this.kbsClient = new KbsClientImpl(httpClient, new ObjectMapper(), kbsUrl);
         this.teeType = teeType;
         this.monitor = monitor;
@@ -45,7 +61,9 @@ public class TemporaryAttestationTokenController {
     @POST
     @Path("/computations/{jobId}/attestation-token")
     public Response getAttestationToken(@PathParam("jobId") String jobId) {
-        var job = jobStore.findById(jobId);
+        var store = jobStore != null ? jobStore : context.getService(ComputationJobStore.class);
+        var cli = cliService != null ? cliService : context.getService(CocosCliService.class);
+        var job = store.findById(jobId);
         if (job.isEmpty() || job.get().getUnits().isEmpty()) {
             return Response.status(Response.Status.NOT_FOUND)
                     .entity(Map.of("error", "No computation job or VM found with id: " + jobId))
@@ -74,7 +92,7 @@ public class TemporaryAttestationTokenController {
             return failure("KBS report-data preparation failed: " + reportData.getFailureDetail());
         }
 
-        var evidence = cliService.requestAttestation(vmIp, nonce, reportData.getContent());
+        var evidence = cli.requestAttestation(vmIp, nonce, reportData.getContent());
         if (evidence.failed()) {
             return failure("CVM attestation failed: " + evidence.getFailureDetail());
         }

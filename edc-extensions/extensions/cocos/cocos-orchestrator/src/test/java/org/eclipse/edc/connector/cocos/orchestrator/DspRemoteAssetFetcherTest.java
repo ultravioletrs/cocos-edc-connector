@@ -1,6 +1,7 @@
 package org.eclipse.edc.connector.cocos.orchestrator;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.eclipse.edc.connector.cocos.spi.CocosContextHolder;
 import org.eclipse.edc.connector.cocos.spi.InMemoryBufferRegistry;
 import org.eclipse.edc.connector.controlplane.services.spi.catalog.CatalogService;
 import org.eclipse.edc.connector.controlplane.services.spi.contractnegotiation.ContractNegotiationService;
@@ -9,6 +10,7 @@ import org.eclipse.edc.connector.controlplane.contract.spi.types.negotiation.Con
 import org.eclipse.edc.connector.controlplane.contract.spi.types.agreement.ContractAgreement;
 import org.eclipse.edc.connector.controlplane.transfer.spi.types.TransferProcess;
 import org.eclipse.edc.spi.response.StatusResult;
+import org.eclipse.edc.spi.response.ResponseStatus;
 import org.eclipse.edc.spi.result.ServiceResult;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -16,6 +18,7 @@ import org.mockito.ArgumentCaptor;
 
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
@@ -42,12 +45,14 @@ class DspRemoteAssetFetcherTest {
         String assetId = "dataset-01";
 
         String catalogJson = "{\n" +
+                "  \"participantId\": \"did:web:provider.example\",\n" +
                 "  \"@context\": \"http://www.w3.org/ns/dcat#\",\n" +
                 "  \"dcat:dataset\": {\n" +
                 "    \"@id\": \"" + assetId + "\",\n" +
-                "    \"odrl:hasPolicy\": {\n" +
-                "      \"@id\": \"policy-offer-01\"\n" +
-                "    }\n" +
+                "    \"odrl:hasPolicy\": [{\n" +
+                "      \"@id\": \"policy-offer-01\",\n" +
+                "      \"permission\": [{\"action\": \"use\"}]\n" +
+                "    }]\n" +
                 "  }\n" +
                 "}";
 
@@ -58,7 +63,6 @@ class DspRemoteAssetFetcherTest {
         when(negotiation.getId()).thenReturn("negotiation-01");
         when(contractNegotiationService.initiateNegotiation(any(), any()))
                 .thenReturn(negotiation);
-
         when(contractNegotiationService.getState("negotiation-01")).thenReturn("FINALIZED");
 
         var agreement = mock(ContractAgreement.class);
@@ -71,10 +75,23 @@ class DspRemoteAssetFetcherTest {
 
         var fetchFuture = fetcher.fetch(providerUrl, assetId);
 
+        var contractRequestCaptor = ArgumentCaptor.forClass(org.eclipse.edc.connector.controlplane.contract.spi.types.negotiation.ContractRequest.class);
+        verify(contractNegotiationService, timeout(2000)).initiateNegotiation(any(), contractRequestCaptor.capture());
+        assertThat(contractRequestCaptor.getValue().getContractOffer().getPolicy().getAssigner())
+                .isEqualTo("did:web:provider.example");
+        assertThat(contractRequestCaptor.getValue().getContractOffer().getPolicy().getPermissions())
+                .singleElement()
+                .extracting(permission -> permission.getAction().getType())
+                .isEqualTo("use");
+        assertThat(contractRequestCaptor.getValue().getCallbackAddresses()).singleElement()
+                .extracting(address -> address.getUri())
+                .isEqualTo("http://127.0.0.1:49205/api/protocol/2025-1");
+
         var requestCaptor = ArgumentCaptor.forClass(org.eclipse.edc.connector.controlplane.transfer.spi.types.TransferRequest.class);
 
         verify(transferProcessService, timeout(2000)).initiateTransfer(any(), requestCaptor.capture());
         var transferRequest = requestCaptor.getValue();
+        assertThat(transferRequest.getTransferType()).isEqualTo("HttpData-PULL");
         String bufferId = transferRequest.getDataDestination().getStringProperty("cocos.buffer.id");
         assertThat(bufferId).isNotNull();
 
@@ -82,6 +99,8 @@ class DspRemoteAssetFetcherTest {
 
         var resultBytes = fetchFuture.get(2, TimeUnit.SECONDS);
         assertThat(new String(resultBytes)).isEqualTo("asset-data-bytes");
+        verify(catalogService).requestCatalog(any(), eq(providerUrl), eq(providerUrl),
+                eq("dataspace-protocol-http:2025-1"), any());
     }
 
     @Test
@@ -212,5 +231,32 @@ class DspRemoteAssetFetcherTest {
                 .hasMessageContaining("DSP consumer flow execution failed")
                 .hasRootCauseInstanceOf(IllegalArgumentException.class)
                 .hasRootCauseMessage("Asset " + missingAssetId + " not found in catalog");
+    }
+
+    @Test
+    void fetch_propagatesCocosContextToAsyncDspWorker() throws Exception {
+        var vmIpSeenByWorker = new AtomicReference<String>();
+        var jobIdSeenByWorker = new AtomicReference<String>();
+
+        when(catalogService.requestCatalog(any(), anyString(), anyString(), any(), any()))
+                .thenAnswer(invocation -> {
+                    vmIpSeenByWorker.set(CocosContextHolder.getActiveVmIp().orElse(null));
+                    jobIdSeenByWorker.set(CocosContextHolder.getActiveJobId().orElse(null));
+                    return CompletableFuture.completedFuture(
+                            StatusResult.failure(ResponseStatus.FATAL_ERROR, "stop after context check"));
+                });
+
+        CocosContextHolder.setActiveVmIp("127.0.0.1:49209");
+        CocosContextHolder.setActiveJobId("catalog-context-test");
+        try {
+            var fetchFuture = fetcher.fetch("http://provider/dsp", "asset-01");
+
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> fetchFuture.get(2, TimeUnit.SECONDS))
+                    .hasMessageContaining("DSP consumer flow execution failed");
+            assertThat(vmIpSeenByWorker).hasValue("127.0.0.1:49209");
+            assertThat(jobIdSeenByWorker).hasValue("catalog-context-test");
+        } finally {
+            CocosContextHolder.clear();
+        }
     }
 }

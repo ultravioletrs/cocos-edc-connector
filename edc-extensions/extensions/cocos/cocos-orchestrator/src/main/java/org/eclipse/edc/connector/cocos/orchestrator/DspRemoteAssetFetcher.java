@@ -2,6 +2,7 @@ package org.eclipse.edc.connector.cocos.orchestrator;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.eclipse.edc.connector.cocos.spi.CocosContextHolder;
 import org.eclipse.edc.connector.cocos.spi.RemoteAssetFetcher;
 import org.eclipse.edc.connector.cocos.spi.InMemoryBufferRegistry;
 import org.eclipse.edc.connector.controlplane.services.spi.catalog.CatalogService;
@@ -11,46 +12,87 @@ import org.eclipse.edc.connector.controlplane.contract.spi.types.negotiation.Con
 import org.eclipse.edc.connector.controlplane.contract.spi.types.offer.ContractOffer;
 import org.eclipse.edc.connector.controlplane.transfer.spi.types.TransferRequest;
 import org.eclipse.edc.participantcontext.spi.types.ParticipantContext;
+import org.eclipse.edc.participantcontext.single.spi.SingleParticipantContextSupplier;
+import org.eclipse.edc.policy.model.Action;
+import org.eclipse.edc.policy.model.Permission;
+import org.eclipse.edc.policy.model.Policy;
 import org.eclipse.edc.spi.query.QuerySpec;
 import org.eclipse.edc.spi.types.domain.DataAddress;
-import org.eclipse.edc.policy.model.Policy;
+import org.eclipse.edc.spi.types.domain.callback.CallbackAddress;
 
 import java.util.UUID;
+import java.util.List;
+import java.util.Set;
+import java.net.HttpURLConnection;
+import java.net.URI;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
 public class DspRemoteAssetFetcher implements RemoteAssetFetcher {
 
+    private static final String DSP_PROTOCOL = "dataspace-protocol-http:2025-1";
+
     private final CatalogService catalogService;
     private final ContractNegotiationService contractNegotiationService;
     private final TransferProcessService transferProcessService;
     private final ObjectMapper objectMapper;
+    private final String callbackUrl;
+    private final SingleParticipantContextSupplier participantContextSupplier;
 
     public DspRemoteAssetFetcher(CatalogService catalogService,
                                  ContractNegotiationService contractNegotiationService,
                                  TransferProcessService transferProcessService,
                                  ObjectMapper objectMapper) {
+        this(catalogService, contractNegotiationService, transferProcessService, objectMapper,
+                "http://127.0.0.1:49205/api/protocol/2025-1", null);
+    }
+
+    public DspRemoteAssetFetcher(CatalogService catalogService,
+                                 ContractNegotiationService contractNegotiationService,
+                                 TransferProcessService transferProcessService,
+                                 ObjectMapper objectMapper,
+                                 String callbackUrl) {
+        this(catalogService, contractNegotiationService, transferProcessService, objectMapper, callbackUrl, null);
+    }
+
+    public DspRemoteAssetFetcher(CatalogService catalogService,
+                                 ContractNegotiationService contractNegotiationService,
+                                 TransferProcessService transferProcessService,
+                                 ObjectMapper objectMapper,
+                                 String callbackUrl,
+                                 SingleParticipantContextSupplier participantContextSupplier) {
         this.catalogService = catalogService;
         this.contractNegotiationService = contractNegotiationService;
         this.transferProcessService = transferProcessService;
         this.objectMapper = objectMapper;
+        this.callbackUrl = callbackUrl;
+        this.participantContextSupplier = participantContextSupplier;
     }
 
     @Override
     public CompletableFuture<byte[]> fetch(String providerConnectorUrl, String assetUrl) {
+        // The DSP flow executes asynchronously, so explicitly capture the
+        // computation context before leaving the request thread. ThreadLocal
+        // values are otherwise invisible to the worker that requests the VP.
+        var activeVmIp = CocosContextHolder.getActiveVmIp().orElse(null);
+        var activeJobId = CocosContextHolder.getActiveJobId().orElse(null);
+
         return CompletableFuture.supplyAsync(() -> {
+            if (activeVmIp != null) {
+                CocosContextHolder.setActiveVmIp(activeVmIp);
+            }
+            if (activeJobId != null) {
+                CocosContextHolder.setActiveJobId(activeJobId);
+            }
             try {
                 // 1. Fetch Catalog
-                var participantContext = ParticipantContext.Builder.newInstance()
-                        .participantContextId("default")
-                        .identity("default")
-                        .build();
+                var participantContext = resolveParticipantContext();
 
                 var catalogFuture = catalogService.requestCatalog(
                         participantContext,
                         providerConnectorUrl,
-                        "dataspace-protocol-http",
-                        null,
+                        providerConnectorUrl,
+                        DSP_PROTOCOL,
                         QuerySpec.max()
                 );
 
@@ -64,8 +106,13 @@ public class DspRemoteAssetFetcher implements RemoteAssetFetcher {
 
                 // 2. Initiate Contract Negotiation
                 var contractRequest = ContractRequest.Builder.newInstance()
-                        .protocol("dataspace-protocol-http")
+                        .protocol(DSP_PROTOCOL)
                         .counterPartyAddress(providerConnectorUrl)
+                        .callbackAddresses(List.of(CallbackAddress.Builder.newInstance()
+                                .uri(callbackUrl)
+                                .events(Set.of("contract.negotiation", "transfer.process"))
+                                .transactional(false)
+                                .build()))
                         .contractOffer(offer)
                         .build();
 
@@ -104,9 +151,10 @@ public class DspRemoteAssetFetcher implements RemoteAssetFetcher {
                         .build();
 
                 var transferRequest = TransferRequest.Builder.newInstance()
-                        .protocol("dataspace-protocol-http")
+                        .protocol(DSP_PROTOCOL)
                         .counterPartyAddress(providerConnectorUrl)
                         .contractId(agreementId)
+                        .transferType("HttpData-PULL")
                         .dataDestination(destination)
                         .build();
 
@@ -116,17 +164,96 @@ public class DspRemoteAssetFetcher implements RemoteAssetFetcher {
                     throw new RuntimeException("Failed to initiate transfer process: " + transferResult.getFailureDetail());
                 }
 
-                // 5. Wait for Data Plane Stream to populate buffer
+                // 5. Prefer the EDR returned by the UMU 0.16 controlplane. That
+                // launcher does not embed a consumer dataplane, so no sink can
+                // populate the in-memory buffer even though the transfer is ready.
                 try {
-                    return bufferFuture.get(2, TimeUnit.MINUTES); // 2 minute transfer timeout
+                    var transferProcess = transferResult.getContent();
+                    var processId = transferProcess.getId();
+                    var deadline = System.nanoTime() + TimeUnit.MINUTES.toNanos(2);
+                    while (System.nanoTime() < deadline) {
+                        var current = processId == null ? null : transferProcessService.findById(processId);
+                        if (current == null || current.getContentDataAddress() == null) {
+                            current = findReadyAssetTransfer(assetUrl);
+                        }
+                        if (current != null && current.getContentDataAddress() != null) {
+                            var data = fetchEndpoint(current.getContentDataAddress());
+                            transferProcessService.complete(processId);
+                            return data;
+                        }
+                        try {
+                            return bufferFuture.get(500, TimeUnit.MILLISECONDS);
+                        } catch (java.util.concurrent.TimeoutException ignored) {
+                            // The EDR may arrive before or after a local dataplane sink.
+                        }
+                    }
+                    throw new java.util.concurrent.TimeoutException("Timed out waiting for transfer EDR or data sink");
                 } finally {
                     InMemoryBufferRegistry.remove(bufferId);
                 }
 
             } catch (Exception e) {
                 throw new RuntimeException("DSP consumer flow execution failed", e);
+            } finally {
+                CocosContextHolder.clear();
             }
         });
+    }
+
+    private byte[] fetchEndpoint(DataAddress address) throws Exception {
+        var endpoint = address.getStringProperty("https://w3id.org/edc/v0.0.1/ns/endpoint");
+        if (endpoint == null) {
+            endpoint = address.getStringProperty("endpoint");
+        }
+        if (endpoint == null) {
+            throw new IllegalArgumentException("Transfer EDR has no endpoint");
+        }
+
+        var connection = (HttpURLConnection) URI.create(endpoint).toURL().openConnection();
+        connection.setRequestMethod("GET");
+        connection.setConnectTimeout(10_000);
+        connection.setReadTimeout(120_000);
+        var authorization = address.getStringProperty("https://w3id.org/edc/v0.0.1/ns/authorization");
+        if (authorization == null) {
+            authorization = address.getStringProperty("authorization");
+        }
+        if (authorization != null && !authorization.isBlank()) {
+            connection.setRequestProperty("Authorization", authorization);
+        }
+        if (connection.getResponseCode() / 100 != 2) {
+            throw new IllegalStateException("EDR endpoint returned HTTP " + connection.getResponseCode());
+        }
+        try (var input = connection.getInputStream()) {
+            return input.readAllBytes();
+        } finally {
+            connection.disconnect();
+        }
+    }
+
+    private org.eclipse.edc.connector.controlplane.transfer.spi.types.TransferProcess findReadyAssetTransfer(String assetId) {
+        var result = transferProcessService.search(QuerySpec.max());
+        if (result == null || result.failed() || result.getContent() == null) {
+            return null;
+        }
+        return result.getContent().stream()
+                .filter(process -> assetId.equals(process.getAssetId()))
+                .filter(process -> process.getContentDataAddress() != null)
+                .findFirst()
+                .orElse(null);
+    }
+
+    private ParticipantContext resolveParticipantContext() {
+        if (participantContextSupplier == null) {
+            return ParticipantContext.Builder.newInstance()
+                    .participantContextId("default")
+                    .identity("default")
+                    .build();
+        }
+        var result = participantContextSupplier.get();
+        if (result.failed()) {
+            throw new RuntimeException("Failed to resolve EDC participant context: " + result.getFailureDetail());
+        }
+        return result.getContent();
     }
 
     /**
@@ -170,11 +297,13 @@ public class DspRemoteAssetFetcher implements RemoteAssetFetcher {
             throw new IllegalArgumentException("Asset " + assetId + " has no policy offer in catalog");
         }
 
+        var offerPolicyNode = policyNode;
         String policyId = null;
         if (policyNode.isObject()) {
             policyId = policyNode.has("@id") ? policyNode.get("@id").asText() : (policyNode.has("id") ? policyNode.get("id").asText() : null);
         } else if (policyNode.isArray() && !policyNode.isEmpty()) {
             var firstPolicy = policyNode.get(0);
+            offerPolicyNode = firstPolicy;
             policyId = firstPolicy.has("@id") ? firstPolicy.get("@id").asText() : (firstPolicy.has("id") ? firstPolicy.get("id").asText() : null);
         }
 
@@ -182,15 +311,52 @@ public class DspRemoteAssetFetcher implements RemoteAssetFetcher {
             policyId = "offer-for-" + assetId;
         }
 
-        var policy = Policy.Builder.newInstance()
+        var policyBuilder = Policy.Builder.newInstance()
                 .target(assetId)
-                .build();
+                .permissions(readPermissions(offerPolicyNode));
+        var participantId = root.path("participantId").asText(null);
+        if (participantId != null && !participantId.isBlank()) {
+            policyBuilder.assigner(participantId);
+        }
+        var policy = policyBuilder.build();
 
         return ContractOffer.Builder.newInstance()
                 .id(policyId)
                 .assetId(assetId)
                 .policy(policy)
                 .build();
+    }
+
+    private List<Permission> readPermissions(JsonNode policyNode) {
+        var permissions = policyNode.get("odrl:permission");
+        if (permissions == null) {
+            permissions = policyNode.get("permission");
+        }
+        if (permissions == null) {
+            return List.of();
+        }
+
+        var permissionNodes = permissions.isArray() ? permissions : List.of(permissions);
+        var result = new java.util.ArrayList<Permission>();
+        for (var permissionNode : permissionNodes) {
+            var actionNode = permissionNode.get("odrl:action");
+            if (actionNode == null) {
+                actionNode = permissionNode.get("action");
+            }
+            if (actionNode == null) {
+                continue;
+            }
+
+            var actionType = actionNode.isTextual()
+                    ? actionNode.asText()
+                    : actionNode.path("@id").asText(actionNode.path("id").asText(actionNode.path("type").asText(null)));
+            if (actionType != null && !actionType.isBlank()) {
+                result.add(Permission.Builder.newInstance()
+                        .action(Action.Builder.newInstance().type(actionType).build())
+                        .build());
+            }
+        }
+        return result;
     }
 
     private JsonNode findDataset(JsonNode root, String assetId) {
