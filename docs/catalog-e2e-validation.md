@@ -94,21 +94,24 @@ The following boundary was verified on 2026-11-02 and 2026-11-03:
 - the connector passed catalog lookup and contract initiation without the
   previous null-provider exception;
 - the provider reached the agreement stage and sent the agreement callback
-  through the EDC 0.16 DSP webhook path.
+  through the EDC 0.16 DSP webhook path;
+- the UMU dataplane public API was started with its required separate public
+  binding (`web.http.public.port` and `web.http.public.path=/public`), and the
+  provider selector advertised `HttpData-PULL` at that endpoint.
 
-The complete transfer was not marked successful in this runbook. After the
-permission-preservation fix, the exact EDC 0.16 provider accepted catalog
-discovery and contract negotiation. The transfer then failed because the
-disposable provider launcher had no registered dataplane capable of handling
-`HttpData-PULL` (`No dataplane found` / `TransferType HttpData-PULL is not
-supported`). The supplied UMU launcher includes a separate dataplane runtime;
-the final UMU test must run that runtime and register it with the provider
-control plane before the result archive can be validated.
+The complete transfer was not marked successful in this runbook. The initial
+attempt failed because the provider had no registered dataplane capable of
+handling `HttpData-PULL` (`No dataplane found`). After starting the supplied
+UMU dataplane and correcting its public binding, the transfer reached the
+public endpoint but the provider still sent no bearer token; the dataplane
+returned `401 Missing Authorization Header`. This is a provider-side UMU
+0.16 transfer-token/STS configuration gap, not a CVM startup, callback
+routing, catalog lookup, manifest upload, or connector transfer-type issue.
 
 The connector also now sets the EDC 0.16 `HttpData-PULL` transfer type on the
 transfer request. This was required by the UMU runtime and is covered by a
-regression test. The remaining blocker is dataplane deployment/registration,
-not CVM startup, callback routing, catalog lookup, or manifest upload.
+regression test. The remaining blocker is UMU provider transfer-token
+configuration, not dataplane route discovery or connector catalog behavior.
 
 The disposable provider used test-only validators and tokens; they must not be
 used as production authentication configuration.
@@ -119,8 +122,9 @@ UMU dataspace test must therefore use the participant credentials, token/STS,
 and ACS configuration supplied by UMU. Do not replace this with a forged token
 or disable authentication in a production deployment.
 Before calling this a full E2E success, repeat the same steps with the UMU
-provider endpoint and its configured participant credentials/STS/ACS and verify
-that the result archive contains the expected output (`42` for the addition
-smoke test). The production integration should use UMU's real participant
-credential service rather than copying the temporary validator jars from the
-local test harness.
+provider endpoint and its configured participant credentials/STS/ACS, ensure
+the provider creates a valid transfer token for the dataplane, and verify that
+the result archive contains the expected output (`42` for the addition smoke
+test). The production integration should use UMU's real participant credential
+service rather than copying the temporary validator jars from the local test
+harness.
