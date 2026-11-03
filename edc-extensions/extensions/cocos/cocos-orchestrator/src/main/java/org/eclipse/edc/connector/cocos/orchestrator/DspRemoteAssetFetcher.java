@@ -23,6 +23,8 @@ import org.eclipse.edc.spi.types.domain.callback.CallbackAddress;
 import java.util.UUID;
 import java.util.List;
 import java.util.Set;
+import java.net.HttpURLConnection;
+import java.net.URI;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
@@ -162,9 +164,30 @@ public class DspRemoteAssetFetcher implements RemoteAssetFetcher {
                     throw new RuntimeException("Failed to initiate transfer process: " + transferResult.getFailureDetail());
                 }
 
-                // 5. Wait for Data Plane Stream to populate buffer
+                // 5. Prefer the EDR returned by the UMU 0.16 controlplane. That
+                // launcher does not embed a consumer dataplane, so no sink can
+                // populate the in-memory buffer even though the transfer is ready.
                 try {
-                    return bufferFuture.get(2, TimeUnit.MINUTES); // 2 minute transfer timeout
+                    var transferProcess = transferResult.getContent();
+                    var processId = transferProcess.getId();
+                    var deadline = System.nanoTime() + TimeUnit.MINUTES.toNanos(2);
+                    while (System.nanoTime() < deadline) {
+                        var current = processId == null ? null : transferProcessService.findById(processId);
+                        if (current == null || current.getContentDataAddress() == null) {
+                            current = findReadyAssetTransfer(assetUrl);
+                        }
+                        if (current != null && current.getContentDataAddress() != null) {
+                            var data = fetchEndpoint(current.getContentDataAddress());
+                            transferProcessService.complete(processId);
+                            return data;
+                        }
+                        try {
+                            return bufferFuture.get(500, TimeUnit.MILLISECONDS);
+                        } catch (java.util.concurrent.TimeoutException ignored) {
+                            // The EDR may arrive before or after a local dataplane sink.
+                        }
+                    }
+                    throw new java.util.concurrent.TimeoutException("Timed out waiting for transfer EDR or data sink");
                 } finally {
                     InMemoryBufferRegistry.remove(bufferId);
                 }
@@ -175,6 +198,48 @@ public class DspRemoteAssetFetcher implements RemoteAssetFetcher {
                 CocosContextHolder.clear();
             }
         });
+    }
+
+    private byte[] fetchEndpoint(DataAddress address) throws Exception {
+        var endpoint = address.getStringProperty("https://w3id.org/edc/v0.0.1/ns/endpoint");
+        if (endpoint == null) {
+            endpoint = address.getStringProperty("endpoint");
+        }
+        if (endpoint == null) {
+            throw new IllegalArgumentException("Transfer EDR has no endpoint");
+        }
+
+        var connection = (HttpURLConnection) URI.create(endpoint).toURL().openConnection();
+        connection.setRequestMethod("GET");
+        connection.setConnectTimeout(10_000);
+        connection.setReadTimeout(120_000);
+        var authorization = address.getStringProperty("https://w3id.org/edc/v0.0.1/ns/authorization");
+        if (authorization == null) {
+            authorization = address.getStringProperty("authorization");
+        }
+        if (authorization != null && !authorization.isBlank()) {
+            connection.setRequestProperty("Authorization", authorization);
+        }
+        if (connection.getResponseCode() / 100 != 2) {
+            throw new IllegalStateException("EDR endpoint returned HTTP " + connection.getResponseCode());
+        }
+        try (var input = connection.getInputStream()) {
+            return input.readAllBytes();
+        } finally {
+            connection.disconnect();
+        }
+    }
+
+    private org.eclipse.edc.connector.controlplane.transfer.spi.types.TransferProcess findReadyAssetTransfer(String assetId) {
+        var result = transferProcessService.search(QuerySpec.max());
+        if (result == null || result.failed() || result.getContent() == null) {
+            return null;
+        }
+        return result.getContent().stream()
+                .filter(process -> assetId.equals(process.getAssetId()))
+                .filter(process -> process.getContentDataAddress() != null)
+                .findFirst()
+                .orElse(null);
     }
 
     private ParticipantContext resolveParticipantContext() {

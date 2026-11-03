@@ -97,21 +97,31 @@ The following boundary was verified on 2026-11-02 and 2026-11-03:
   through the EDC 0.16 DSP webhook path;
 - the UMU dataplane public API was started with its required separate public
   binding (`web.http.public.port` and `web.http.public.path=/public`), and the
-  provider selector advertised `HttpData-PULL` at that endpoint.
+  provider selector advertised `HttpData-PULL` at that endpoint;
+- the provider created a state-600 transfer with a signed EDR endpoint; and
+- the connector fetched the algorithm bytes from that EDR and reached the
+  real CVM's algorithm-upload phase.
 
-The complete transfer was not marked successful in this runbook. The initial
-attempt failed because the provider had no registered dataplane capable of
-handling `HttpData-PULL` (`No dataplane found`). After starting the supplied
-UMU dataplane and correcting its public binding, the transfer reached the
-public endpoint but the provider still sent no bearer token; the dataplane
-returned `401 Missing Authorization Header`. This is a provider-side UMU
-0.16 transfer-token/STS configuration gap, not a CVM startup, callback
-routing, catalog lookup, manifest upload, or connector transfer-type issue.
+The final algorithm result was not marked successful. The UMU 0.16 launcher
+used for this validation is a control-plane-only consumer and has no embedded
+consumer dataplane. The connector therefore consumes the provider's ready EDR
+directly, including its authorization property, instead of waiting forever for
+an in-memory sink that is not present. This is the expected behavior for this
+launcher layout and is covered by the connector build and integration run.
 
-The connector also now sets the EDC 0.16 `HttpData-PULL` transfer type on the
-transfer request. This was required by the UMU runtime and is covered by a
-regression test. The remaining blocker is UMU provider transfer-token
-configuration, not dataplane route discovery or connector catalog behavior.
+The remaining failure occurred inside the test CVM: after the connector
+started `cocos-cli algo`, the guest agent stayed in `ReceivingAlgorithm` until
+the 60-second CLI timeout. No result archive was produced, so the expected
+`42` output has not been claimed. The catalog lookup, DSP negotiation,
+contract agreement, provider transfer, EDR retrieval, and manifest handoff
+were successful before that guest-side timeout. Capture `/var/log/cocos/*`
+from the guest and the connector log around the timeout before changing the
+UMU launcher or dataspace configuration.
+
+The connector sets the EDC 0.16 `HttpData-PULL` transfer type on the transfer
+request. The host validation command passed all eight `cocos-orchestrator`
+tests and built the UMU-compatible
+`cocos-orchestrator-0.16.0-titan.jar`.
 
 The disposable provider used test-only validators and tokens; they must not be
 used as production authentication configuration.
@@ -123,8 +133,8 @@ and ACS configuration supplied by UMU. Do not replace this with a forged token
 or disable authentication in a production deployment.
 Before calling this a full E2E success, repeat the same steps with the UMU
 provider endpoint and its configured participant credentials/STS/ACS, ensure
-the provider creates a valid transfer token for the dataplane, and verify that
-the result archive contains the expected output (`42` for the addition smoke
-test). The production integration should use UMU's real participant credential
-service rather than copying the temporary validator jars from the local test
-harness.
+the provider creates a valid transfer token for the dataplane, restart the CVM
+with a clean agent state, and verify that the result archive contains the
+expected output (`42` for the addition smoke test). The production integration
+should use UMU's real participant credential service rather than copying the
+temporary validator jars from the local test harness.
